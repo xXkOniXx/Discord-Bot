@@ -654,7 +654,7 @@ async def on_message(message):
     if user["xp"] >= needed:
         user["xp"] -= needed
         user["level"] += 1
-
+        await send_levelup_image(channel, member, new_level)
         # Level role rewards
         reward = guild_settings["level_roles"].get(str(user["level"]))
         if reward:
