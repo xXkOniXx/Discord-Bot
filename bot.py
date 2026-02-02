@@ -654,7 +654,10 @@ async def on_message(message):
     if user["xp"] >= needed:
         user["xp"] -= needed
         user["level"] += 1
-        await send_levelup_image(channel, member, new_level)
+
+     await send_levelup_image(channel, member, new_level)
+ 
+
         # Level role rewards
         reward = guild_settings["level_roles"].get(str(user["level"]))
         if reward:
@@ -726,13 +729,8 @@ async def setlevelrole(interaction: discord.Interaction, level: int, role: disco
     save(SETTINGS_FILE, settings)
     await interaction.response.send_message(f"🏆 Level {level} → {role.name}", ephemeral=True)
 
-# ================== SEND LEVEL UP IMAGE ==================
-async def send_levelup_image(channel: discord.TextChannel, member: discord.Member, level: int):
-    img_bytes = await create_levelup_image(member, level)
-    file = discord.File(fp=img_bytes, filename="levelup.png")
-    await channel.send(f"🎉 Congrats {member.mention}, you leveled up to **Level {level}**!", file=file)
-if new_level > old_level:
-    await send_levelup_image(channel, member, new_level)
+
+
 
 # ================== RUN ==================
 bot.run(os.getenv("DISCORD_TOKEN"))
