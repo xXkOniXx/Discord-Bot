@@ -1,5 +1,0 @@
-discord.py
-pillow
-aiohttp
-pytz
-discord.py==2.6.1

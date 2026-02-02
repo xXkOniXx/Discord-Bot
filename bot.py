@@ -7,7 +7,7 @@ from datetime import datetime
 import pytz
 from PIL import Image, ImageDraw, ImageFont
 import aiohttp
-
+GUILD_ID = 1386046923693101076
 # ================== INTENTS ==================
 intents = discord.Intents.default()
 intents.members = True
@@ -36,9 +36,14 @@ def save_json(path, data):
 # ================== READY ==================
 @bot.event
 async def on_ready():
-    await tree.sync()
-    auto_update.start()
-    print(f"✅ Online as {bot.user}")
+    guild = discord.Object(id=GUILD_ID)
+
+    tree.clear_commands(guild=guild)  # wipes old broken ones
+    await tree.sync(guild=guild)      # re-syncs instantly
+
+    print(f"✅ Synced slash commands to {GUILD_ID}")
+    print(f"Logged in as {bot.user}")
+
 
 # ======================================================
 # ================== ROLE TRACKING =====================
@@ -181,6 +186,194 @@ async def setbg(interaction: discord.Interaction, image: discord.Attachment):
     settings.setdefault(str(interaction.guild.id), default_settings())["levelup_bg"] = path
     save_json(SETTINGS_FILE, settings)
     await interaction.response.send_message("✅ Level-up background set!", ephemeral=True)
+@tree.command(name="setxp", description="Set XP range per message")
+@app_commands.checks.has_permissions(administrator=True)
+async def setxp(interaction: discord.Interaction, min_xp: int, max_xp: int):
+    if min_xp <= 0 or max_xp < min_xp:
+        await interaction.response.send_message("❌ Invalid XP range.", ephemeral=True)
+        return
+
+    gid = str(interaction.guild.id)
+    leveling_settings.setdefault(gid, {})
+    leveling_settings[gid]["xp_per_message"] = [min_xp, max_xp]
+    save_leveling()
+
+    await interaction.response.send_message(
+        f"✅ XP per message set to **{min_xp}–{max_xp}**",
+        ephemeral=True
+    )
+@tree.command(name="leaderboard", description="Show the leveling leaderboard")
+async def leaderboard(interaction: discord.Interaction):
+    gid = str(interaction.guild.id)
+    guild_data = leveling_data.get(gid, {})
+
+    if not guild_data:
+        await interaction.response.send_message("❌ No leveling data yet.", ephemeral=True)
+        return
+
+    sorted_users = sorted(
+        guild_data.items(),
+        key=lambda x: (x[1]["level"], x[1]["xp"]),
+        reverse=True
+    )[:10]
+
+    embed = discord.Embed(title="🏆 Level Leaderboard", color=discord.Color.gold())
+
+    for i, (uid, data) in enumerate(sorted_users, start=1):
+        member = interaction.guild.get_member(int(uid))
+        if member:
+            embed.add_field(
+                name=f"{i}. {member.display_name}",
+                value=f"Level **{data['level']}** • XP **{data['xp']}**",
+                inline=False
+            )
+
+    embed.set_footer(text="Koni was here")
+    await interaction.response.send_message(embed=embed)
+
+@tree.command(name="setrankbackground", description="Upload a custom rank card background")
+async def setrankbackground(interaction: discord.Interaction, image: discord.Attachment):
+    if not image.content_type or not image.content_type.startswith("image/"):
+        await interaction.response.send_message("❌ Please upload an image file.", ephemeral=True)
+        return
+
+    gid = str(interaction.guild.id)
+    uid = str(interaction.user.id)
+
+    folder = f"rank_backgrounds/{gid}"
+    os.makedirs(folder, exist_ok=True)
+
+    path = f"{folder}/{uid}.png"
+    await image.save(path)
+
+    leveling_settings.setdefault(gid, {})
+    leveling_settings[gid].setdefault("rank_backgrounds", {})
+    leveling_settings[gid]["rank_backgrounds"][uid] = path
+    save_leveling()
+
+    await interaction.response.send_message("✅ Your custom rank card background has been set!", ephemeral=True)
+bg_path = leveling_settings.get(str(member.guild.id), {}).get("rank_backgrounds", {}).get(str(member.id))
+
+if bg_path and os.path.exists(bg_path):
+    card = Image.open(bg_path).convert("RGB").resize((width, height))
+else:
+    card = Image.new("RGB", (width, height), color=bg_color)
+@bot.event
+async def on_message(message):
+    if message.author.bot or not message.guild:
+        return
+
+    gid = str(message.guild.id)
+    uid = str(message.author.id)
+
+    leveling_settings.setdefault(gid, {})
+    leveling_data.setdefault(gid, {})
+
+    settings = leveling_settings[gid]
+    user = leveling_data[gid].setdefault(uid, {"xp": 0, "level": 0, "last": 0})
+
+    cooldown = settings.get("cooldown", 60)
+    now = datetime.utcnow().timestamp()
+
+    if now - user["last"] < cooldown:
+        return
+
+    user["last"] = now
+
+    min_xp, max_xp = settings.get("xp_per_message", [10, 20])
+    gained = random.randint(min_xp, max_xp)
+
+    user["xp"] += gained
+    required = 100 + (user["level"] * 50)
+
+    if user["xp"] >= required:
+        user["xp"] -= required
+        user["level"] += 1
+
+        await message.channel.send(
+            f"🎉 {message.author.mention} reached **Level {user['level']}!**"
+        )
+
+    save_leveling()
+    await bot.process_commands(message)
+from PIL import Image, ImageDraw, ImageFont, ImageSequence
+import imageio
+import math
+
+def create_animated_rank_card(member, level, xp, required_xp, avatar_path):
+    width, height = 800, 250
+    frames = []
+
+    percent = xp / required_xp
+    bar_max_width = 500
+
+    avatar = Image.open(avatar_path).resize((180, 180)).convert("RGBA")
+
+    for i in range(15):  # number of frames (smoothness)
+        frame = Image.new("RGB", (width, height), (30, 30, 30))
+        draw = ImageDraw.Draw(frame)
+
+        # Animated bar fill
+        animated_percent = percent * (i / 14)
+        bar_width = int(bar_max_width * animated_percent)
+
+        # Background bar
+        draw.rectangle((250, 150, 750, 190), fill=(50, 50, 50))
+
+        # XP bar (animated fill)
+        draw.rectangle((250, 150, 250 + bar_width, 190), fill=(120, 0, 255))
+
+        # Text
+        draw.text((250, 50), f"{member.name}", fill="white")
+        draw.text((250, 90), f"Level {level}", fill="white")
+        draw.text((250, 120), f"{xp}/{required_xp} XP", fill="white")
+
+        # Avatar
+        frame.paste(avatar, (40, 35), avatar)
+
+        frames.append(frame)
+
+    gif_path = f"rank_{member.id}.gif"
+    frames[0].save(
+        gif_path,
+        save_all=True,
+        append_images=frames[1:],
+        duration=60,
+        loop=0
+    )
+
+    return gif_path
+@tree.command(name="rank", description="View your animated rank card")
+async def rank(interaction: discord.Interaction, member: discord.Member = None):
+    member = member or interaction.user
+    gid = str(interaction.guild.id)
+    uid = str(member.id)
+
+    user = leveling_data.get(gid, {}).get(uid)
+    if not user:
+        await interaction.response.send_message("No level data yet!", ephemeral=True)
+        return
+
+    avatar_path = f"avatar_{uid}.png"
+    await member.display_avatar.save(avatar_path)
+
+    required = 100 + (user["level"] * 50)
+
+    gif_path = create_animated_rank_card(
+        member,
+        user["level"],
+        user["xp"],
+        required,
+        avatar_path
+    )
+
+    file = discord.File(gif_path, filename="rank.gif")
+    await interaction.response.send_message(file=file)
+
+@tree.command(name="setcooldown", description="Set XP cooldown in seconds", guild=discord.Object(id=GUILD_ID))
+async def setcooldown(interaction: discord.Interaction, seconds: int):
+    xp_settings["cooldown"] = seconds
+    await interaction.response.send_message(f"⏳ Cooldown set to {seconds} seconds")
 
 # ================== RUN ==================
 bot.run(os.getenv("DISCORD_TOKEN"))
