@@ -651,25 +651,27 @@ async def on_message(message):
     user["xp"] += xp
     needed = xp_needed(user["level"])
 
-    if user["xp"] >= needed:
-        user["xp"] -= needed
-        user["level"] += 1
+if user["xp"] >= needed:
+    user["xp"] -= needed
+    user["level"] += 1
 
-     await send_levelup_image(channel, member, new_level)
- 
+    reward = guild_settings["level_roles"].get(str(user["level"]))
+    if reward:
+        role = message.guild.get_role(int(reward))
+        if role:
+            await message.author.add_roles(role)
 
-        # Level role rewards
-        reward = guild_settings["level_roles"].get(str(user["level"]))
-        if reward:
-            role = message.guild.get_role(int(reward))
-            if role:
-                await message.author.add_roles(role)
+    img = rank_card(
+        message.author,
+        user["level"],
+        user["xp"],
+        xp_needed(user["level"])
+    )
 
-        img = rank_card(message.author, user["level"], user["xp"], xp_needed(user["level"]))
-        await message.channel.send(
-            f"🎉 **{message.author.mention} reached Level {user['level']}!**",
-            file=discord.File(img, "levelup.png")
-        )
+    await message.channel.send(
+        f"🎉 **{message.author.mention} reached Level {user['level']}!**",
+        file=discord.File(img, "levelup.png")
+    )
 
     save(LEVEL_FILE, levels)
     await bot.process_commands(message)
