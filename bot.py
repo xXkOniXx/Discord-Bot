@@ -48,16 +48,17 @@ def xp_needed(level):
 # ================== READY ==================
 @bot.event
 async def on_ready():
-    guild = discord.Object(id=GUILD_ID)
-    print("🔄 Syncing commands...")
-    tree.clear_commands(guild=guild)
-    await tree.sync(guild=guild)
+    print("🔄 Syncing commands globally...")
 
-    if not auto_update.is_running():
-        auto_update.start()
+    try:
+        synced = await tree.sync()  # Global sync (no guild wipe)
+        print(f"✅ Synced {len(synced)} commands globally")
+    except Exception as e:
+        print(f"❌ Sync error: {e}")
 
-    print(f"✅ Synced slash commands to guild {GUILD_ID}")
+    auto_update.start()
     print(f"🤖 Logged in as {bot.user}")
+
 
 # ======================================================
 # ================== ROLE TRACKING =====================
