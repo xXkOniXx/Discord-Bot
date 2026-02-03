@@ -49,12 +49,12 @@ def xp_needed(level):
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
-
     print("🔄 Syncing commands...")
     tree.clear_commands(guild=guild)
     await tree.sync(guild=guild)
 
-    auto_update.start()
+    if not auto_update.is_running():
+        auto_update.start()
 
     print(f"✅ Synced slash commands to guild {GUILD_ID}")
     print(f"🤖 Logged in as {bot.user}")
@@ -68,7 +68,7 @@ def role_count(role):
 def role_embed(role):
     return discord.Embed(
         title="📊 Role Count",
-        description=f"{role.mention}\n👥 **Members:** {role_count(role)}",
+        description=f"{role.mention}\n👥 Members: {role_count(role)}",
         color=role.color if role.color.value else discord.Color.blurple()
     )
 
@@ -105,7 +105,11 @@ async def auto_update():
 # ================== LEVEL SYSTEM ======================
 # ======================================================
 async def create_levelup_image(member, level, bg_path):
-    bg = Image.open(bg_path).convert("RGBA") if bg_path and os.path.exists(bg_path) else Image.new("RGBA",(800,200),(54,57,63,255))
+    if bg_path and os.path.exists(bg_path):
+        bg = Image.open(bg_path).convert("RGBA")
+    else:
+        bg = Image.new("RGBA", (800, 200), (54, 57, 63, 255))
+
     draw = ImageDraw.Draw(bg)
 
     try:
@@ -118,6 +122,7 @@ async def create_levelup_image(member, level, bg_path):
     avatar = member.display_avatar.with_size(128)
     buf = io.BytesIO()
     await avatar.save(buf)
+    buf.seek(0)
     av = Image.open(buf).resize((120,120))
     bg.paste(av,(50,40),av)
 
@@ -160,13 +165,12 @@ async def on_message(message):
         img = await create_levelup_image(message.author, user["level"], gset.get("levelup_bg"))
 
         await message.channel.send(
-            f"🎉 {message.author.mention} reached **Level {user['level']}!**",
+            f"🎉 {message.author.mention} reached Level {user['level']}!",
             file=discord.File(img, "levelup.png")
         )
 
     save_json(LEVEL_FILE, levels)
     save_json(SETTINGS_FILE, settings)
-
     await bot.process_commands(message)
 
 # ======================================================
@@ -175,14 +179,19 @@ async def on_message(message):
 def create_animated_rank_card(member, level, xp, required_xp, avatar_path, bg_path=None):
     width, height = 800, 250
     frames = []
-    percent = xp / required_xp
+    percent = xp / required_xp if required_xp else 0
+
     avatar = Image.open(avatar_path).resize((180, 180)).convert("RGBA")
 
     for i in range(15):
-        base = Image.open(bg_path).convert("RGB").resize((width,height)) if bg_path and os.path.exists(bg_path) else Image.new("RGB",(width,height),(30,30,30))
-        draw = ImageDraw.Draw(base)
+        if bg_path and os.path.exists(bg_path):
+            base = Image.open(bg_path).convert("RGB").resize((width,height))
+        else:
+            base = Image.new("RGB",(width,height),(30,30,30))
 
+        draw = ImageDraw.Draw(base)
         bar_width = int(500 * percent * (i/14))
+
         draw.rectangle((250,150,750,190), fill=(50,50,50))
         draw.rectangle((250,150,250+bar_width,190), fill=(120,0,255))
 
@@ -222,7 +231,6 @@ async def rank(interaction: discord.Interaction, member: Optional[discord.Member
     gif = create_animated_rank_card(member, user["level"], user["xp"], required, avatar_path, bg_path)
     await interaction.response.send_message(file=discord.File(gif))
 
-
 @tree.command(name="leaderboard")
 async def leaderboard(interaction: discord.Interaction):
     levels = load_json(LEVEL_FILE,{})
@@ -237,7 +245,6 @@ async def leaderboard(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
-
 @tree.command(name="setxp")
 @app_commands.checks.has_permissions(administrator=True)
 async def setxp(interaction: discord.Interaction, min_xp:int, max_xp:int):
@@ -247,7 +254,6 @@ async def setxp(interaction: discord.Interaction, min_xp:int, max_xp:int):
     save_json(SETTINGS_FILE, settings)
     await interaction.response.send_message("✅ XP updated", ephemeral=True)
 
-
 @tree.command(name="setcooldown")
 @app_commands.checks.has_permissions(administrator=True)
 async def setcooldown(interaction: discord.Interaction, seconds:int):
@@ -256,7 +262,6 @@ async def setcooldown(interaction: discord.Interaction, seconds:int):
     settings.setdefault(gid, default_settings())["cooldown"] = seconds
     save_json(SETTINGS_FILE, settings)
     await interaction.response.send_message("⏳ Cooldown updated", ephemeral=True)
-
 
 @tree.command(name="setrankbackground")
 async def setrankbackground(interaction: discord.Interaction, image: discord.Attachment):
@@ -269,12 +274,11 @@ async def setrankbackground(interaction: discord.Interaction, image: discord.Att
     save_json(SETTINGS_FILE, settings)
     await interaction.response.send_message("✅ Rank background set!", ephemeral=True)
 
-
-@tree.command(name="setlevelupbackground", description="Set the level-up card background image")
+@tree.command(name="setlevelupbackground")
 @app_commands.checks.has_permissions(administrator=True)
 async def setlevelupbackground(interaction: discord.Interaction, image: discord.Attachment):
     if not image.content_type or not image.content_type.startswith("image/"):
-        await interaction.response.send_message("❌ Please upload a valid image file.", ephemeral=True)
+        await interaction.response.send_message("❌ Upload an image file.", ephemeral=True)
         return
 
     settings = load_json(SETTINGS_FILE, {})
@@ -282,52 +286,36 @@ async def setlevelupbackground(interaction: discord.Interaction, image: discord.
 
     os.makedirs("levelup_backgrounds", exist_ok=True)
     path = f"levelup_backgrounds/{gid}.png"
-
     await image.save(path)
 
     settings.setdefault(gid, default_settings())["levelup_bg"] = path
     save_json(SETTINGS_FILE, settings)
-
     await interaction.response.send_message("✅ Level-up background updated!", ephemeral=True)
 
-
-@tree.command(name="setrolereward", description="Give a role when users reach a level")
+@tree.command(name="setrolereward")
 @app_commands.checks.has_permissions(administrator=True)
 async def setrolereward(interaction: discord.Interaction, level: int, role: discord.Role):
     settings = load_json(SETTINGS_FILE, {})
     gid = str(interaction.guild.id)
-
-    settings.setdefault(gid, default_settings())
-    settings[gid].setdefault("role_rewards", {})
-    settings[gid]["role_rewards"][str(level)] = role.id
-
+    settings.setdefault(gid, default_settings())["role_rewards"][str(level)] = role.id
     save_json(SETTINGS_FILE, settings)
+    await interaction.response.send_message(f"🎁 {role.mention} will be given at Level {level}", ephemeral=True)
 
-    await interaction.response.send_message(
-        f"🎁 Users will now receive {role.mention} at **Level {level}**!",
-        ephemeral=True
-    )
-
-
-@tree.command(name="removerolereward", description="Remove a level role reward")
+@tree.command(name="removerolereward")
 @app_commands.checks.has_permissions(administrator=True)
 async def removerolereward(interaction: discord.Interaction, level: int):
     settings = load_json(SETTINGS_FILE, {})
     gid = str(interaction.guild.id)
+    rewards = settings.setdefault(gid, default_settings())["role_rewards"]
 
-    rewards = settings.setdefault(gid, default_settings()).setdefault("role_rewards", {})
-
-    if str(level) not in rewards:
+    if str(level) in rewards:
+        del rewards[str(level)]
+        save_json(SETTINGS_FILE, settings)
+        await interaction.response.send_message("🗑️ Reward removed.", ephemeral=True)
+    else:
         await interaction.response.send_message("❌ No reward set for that level.", ephemeral=True)
-        return
 
-    del rewards[str(level)]
-    save_json(SETTINGS_FILE, settings)
-
-    await interaction.response.send_message(f"🗑️ Removed reward for Level {level}.", ephemeral=True)
-
-
-@tree.command(name="rolerewards", description="View all level role rewards")
+@tree.command(name="rolerewards")
 async def rolerewards(interaction: discord.Interaction):
     settings = load_json(SETTINGS_FILE, {})
     gid = str(interaction.guild.id)
@@ -341,11 +329,12 @@ async def rolerewards(interaction: discord.Interaction):
     for level, role_id in sorted(rewards.items(), key=lambda x: int(x[0])):
         role = interaction.guild.get_role(int(role_id))
         if role:
-            desc += f"**Level {level}** → {role.mention}\n"
+            desc += f"Level {level} → {role.mention}\n"
 
     embed = discord.Embed(title="🎖️ Level Role Rewards", description=desc, color=discord.Color.green())
     await interaction.response.send_message(embed=embed)
 
 # ================== RUN ==================
 bot.run(os.getenv("DISCORD_TOKEN"))
+
 
