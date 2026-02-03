@@ -145,22 +145,29 @@ async def on_message(message):
     user["last"] = time.time()
     user["xp"] += random.randint(*gset["xp_range"])
 
-    if user["xp"] >= xp_needed(user["level"]):
+     if user["xp"] >= xp_needed(user["level"]):
         user["xp"] -= xp_needed(user["level"])
         user["level"] += 1
 
+        # 🎁 ROLE REWARD
         reward = gset["role_rewards"].get(str(user["level"]))
         if reward:
             role = message.guild.get_role(int(reward))
             if role:
                 await message.author.add_roles(role)
 
-        img = await create_levelup_image(message.author, user["level"], gset["levelup_bg"])
-        await message.channel.send(f"🎉 {message.author.mention} leveled up!", file=discord.File(img,"levelup.png"))
+        # 🖼️ LEVEL UP IMAGE
+        img = await create_levelup_image(
+            message.author,
+            user["level"],
+            gset.get("levelup_bg")
+        )
 
-    save_json(LEVEL_FILE, levels)
-    save_json(SETTINGS_FILE, settings)
-    await bot.process_commands(message)
+        await message.channel.send(
+            f"🎉 {message.author.mention} reached **Level {user['level']}!**",
+            file=discord.File(img, "levelup.png")
+        )
+
 
 # ======================================================
 # ================== RANK CARD =========================
@@ -275,7 +282,7 @@ async def setlevelupbackground(interaction: discord.Interaction, image: discord.
     save_json(SETTINGS_FILE, settings)
 
     await interaction.response.send_message("✅ Level-up background updated!", ephemeral=True)
-img = await create_levelup_image(message.author, user["level"], gset["levelup_bg"])
+
 
 @tree.command(name="setrolereward", description="Give a role when users reach a level")
 @app_commands.checks.has_permissions(administrator=True)
