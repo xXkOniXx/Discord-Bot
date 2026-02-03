@@ -49,11 +49,15 @@ def xp_needed(level):
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
+
+    print("🔄 Syncing commands...")
     tree.clear_commands(guild=guild)
     await tree.sync(guild=guild)
+
     auto_update.start()
-    print(f"✅ Synced slash commands to {GUILD_ID}")
-    print(f"Logged in as {bot.user}")
+
+    print(f"✅ Synced slash commands to guild {GUILD_ID}")
+    print(f"🤖 Logged in as {bot.user}")
 
 # ======================================================
 # ================== ROLE TRACKING =====================
@@ -134,35 +138,26 @@ async def on_message(message):
     glevels = levels.setdefault(str(message.guild.id), {})
     user = glevels.setdefault(str(message.author.id), {"xp": 0, "level": 1, "last": 0})
 
-    # 🚫 Ignored channels
     if str(message.channel.id) in gset["ignored_channels"]:
         return
 
-    # ⏳ Cooldown check
     if time.time() - user["last"] < gset["cooldown"]:
         return
 
     user["last"] = time.time()
     user["xp"] += random.randint(*gset["xp_range"])
 
-    # 🎉 LEVEL UP CHECK
     if user["xp"] >= xp_needed(user["level"]):
         user["xp"] -= xp_needed(user["level"])
         user["level"] += 1
 
-        # 🎁 Role reward
         reward = gset["role_rewards"].get(str(user["level"]))
         if reward:
             role = message.guild.get_role(int(reward))
             if role:
                 await message.author.add_roles(role)
 
-        # 🖼️ Level-up image
-        img = await create_levelup_image(
-            message.author,
-            user["level"],
-            gset.get("levelup_bg")
-        )
+        img = await create_levelup_image(message.author, user["level"], gset.get("levelup_bg"))
 
         await message.channel.send(
             f"🎉 {message.author.mention} reached **Level {user['level']}!**",
@@ -173,8 +168,6 @@ async def on_message(message):
     save_json(SETTINGS_FILE, settings)
 
     await bot.process_commands(message)
-
-
 
 # ======================================================
 # ================== RANK CARD =========================
@@ -207,6 +200,7 @@ def create_animated_rank_card(member, level, xp, required_xp, avatar_path, bg_pa
 # ======================================================
 # ================== COMMANDS ==========================
 # ======================================================
+
 @tree.command(name="rank", description="View your animated rank card")
 async def rank(interaction: discord.Interaction, member: Optional[discord.Member]=None):
     member = member or interaction.user
@@ -228,23 +222,6 @@ async def rank(interaction: discord.Interaction, member: Optional[discord.Member
     gif = create_animated_rank_card(member, user["level"], user["xp"], required, avatar_path, bg_path)
     await interaction.response.send_message(file=discord.File(gif))
 
-@tree.command(name="setxp")
-@app_commands.checks.has_permissions(administrator=True)
-async def setxp(interaction: discord.Interaction, min_xp:int, max_xp:int):
-    settings = load_json(SETTINGS_FILE,{})
-    gid = str(interaction.guild.id)
-    settings.setdefault(gid, default_settings())["xp_range"] = [min_xp,max_xp]
-    save_json(SETTINGS_FILE, settings)
-    await interaction.response.send_message("✅ XP updated", ephemeral=True)
-
-@tree.command(name="setcooldown")
-@app_commands.checks.has_permissions(administrator=True)
-async def setcooldown(interaction: discord.Interaction, seconds:int):
-    settings = load_json(SETTINGS_FILE,{})
-    gid = str(interaction.guild.id)
-    settings.setdefault(gid, default_settings())["cooldown"] = seconds
-    save_json(SETTINGS_FILE, settings)
-    await interaction.response.send_message("⏳ Cooldown updated", ephemeral=True)
 
 @tree.command(name="leaderboard")
 async def leaderboard(interaction: discord.Interaction):
@@ -260,6 +237,27 @@ async def leaderboard(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
+
+@tree.command(name="setxp")
+@app_commands.checks.has_permissions(administrator=True)
+async def setxp(interaction: discord.Interaction, min_xp:int, max_xp:int):
+    settings = load_json(SETTINGS_FILE,{})
+    gid = str(interaction.guild.id)
+    settings.setdefault(gid, default_settings())["xp_range"] = [min_xp,max_xp]
+    save_json(SETTINGS_FILE, settings)
+    await interaction.response.send_message("✅ XP updated", ephemeral=True)
+
+
+@tree.command(name="setcooldown")
+@app_commands.checks.has_permissions(administrator=True)
+async def setcooldown(interaction: discord.Interaction, seconds:int):
+    settings = load_json(SETTINGS_FILE,{})
+    gid = str(interaction.guild.id)
+    settings.setdefault(gid, default_settings())["cooldown"] = seconds
+    save_json(SETTINGS_FILE, settings)
+    await interaction.response.send_message("⏳ Cooldown updated", ephemeral=True)
+
+
 @tree.command(name="setrankbackground")
 async def setrankbackground(interaction: discord.Interaction, image: discord.Attachment):
     settings = load_json(SETTINGS_FILE,{})
@@ -270,6 +268,8 @@ async def setrankbackground(interaction: discord.Interaction, image: discord.Att
     settings.setdefault(gid, default_settings())["rank_backgrounds"][uid] = path
     save_json(SETTINGS_FILE, settings)
     await interaction.response.send_message("✅ Rank background set!", ephemeral=True)
+
+
 @tree.command(name="setlevelupbackground", description="Set the level-up card background image")
 @app_commands.checks.has_permissions(administrator=True)
 async def setlevelupbackground(interaction: discord.Interaction, image: discord.Attachment):
@@ -307,6 +307,8 @@ async def setrolereward(interaction: discord.Interaction, level: int, role: disc
         f"🎁 Users will now receive {role.mention} at **Level {level}**!",
         ephemeral=True
     )
+
+
 @tree.command(name="removerolereward", description="Remove a level role reward")
 @app_commands.checks.has_permissions(administrator=True)
 async def removerolereward(interaction: discord.Interaction, level: int):
@@ -323,6 +325,8 @@ async def removerolereward(interaction: discord.Interaction, level: int):
     save_json(SETTINGS_FILE, settings)
 
     await interaction.response.send_message(f"🗑️ Removed reward for Level {level}.", ephemeral=True)
+
+
 @tree.command(name="rolerewards", description="View all level role rewards")
 async def rolerewards(interaction: discord.Interaction):
     settings = load_json(SETTINGS_FILE, {})
@@ -342,6 +346,6 @@ async def rolerewards(interaction: discord.Interaction):
     embed = discord.Embed(title="🎖️ Level Role Rewards", description=desc, color=discord.Color.green())
     await interaction.response.send_message(embed=embed)
 
-
 # ================== RUN ==================
 bot.run(os.getenv("DISCORD_TOKEN"))
+
