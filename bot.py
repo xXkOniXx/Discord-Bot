@@ -334,7 +334,666 @@ async def rolerewards(interaction: discord.Interaction):
 
     embed = discord.Embed(title="🎖️ Level Role Rewards", description=desc, color=discord.Color.green())
     await interaction.response.send_message(embed=embed)
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/bot.py b/bot.py
+index c0dfd9fd1dd69acef191dbdd324fe675ce9c51cf..19e7a298ab02765aa583204a597ac450025d206f 100644
+--- a/bot.py
++++ b/bot.py
+@@ -1,72 +1,157 @@
+ import discord
+ from discord.ext import commands, tasks
+ from discord import app_commands
+ import json, os, random, io, time
+ from typing import Optional
+ from PIL import Image, ImageDraw, ImageFont
+ 
+ GUILD_ID = 1386046923693101076
+ 
+ # ================== INTENTS ==================
+ intents = discord.Intents.default()
+ intents.members = True
+ intents.message_content = True
+ 
+ bot = commands.Bot(command_prefix="!", intents=intents)
+ tree = bot.tree
+ 
+ # ================== FILES ==================
+ TRACKED_FILE = "tracked_roles.json"
+ LEVEL_FILE = "leveling_data.json"
+ SETTINGS_FILE = "leveling_settings.json"
++ECONOMY_FILE = "economy_data.json"
+ 
+ # ================== JSON UTILS ==================
+ def load_json(path, default=None):
+     if not os.path.exists(path):
+         return default if default is not None else {}
+     with open(path, "r") as f:
+         return json.load(f)
+ 
+ def save_json(path, data):
+     with open(path, "w") as f:
+         json.dump(data, f, indent=4)
+ 
+ # ================== DEFAULT SETTINGS ==================
+ def default_settings():
+     return {
+         "xp_range": [10, 20],
+         "cooldown": 60,
+         "ignored_channels": [],
+         "role_rewards": {},
+         "levelup_bg": None,
+-        "rank_backgrounds": {}
++        "rank_backgrounds": {},
++        "xp_multiplier": 1.0,
++        "level_channel": None,
++        "level_notify": {},
++        "max_level": 100,
++        "voice_bonus_xp": 10,
++        "voice_bonus_cooldown": 300
+     }
+ 
+ def xp_needed(level):
+     return 100 + level * 75
+ 
++def default_economy_user():
++    return {
++        "coins": 0,
++        "rep": 0,
++        "rep_last": 0,
++        "last_daily": 0,
++        "daily_streak": 0,
++        "last_work": 0,
++        "backgrounds": [],
++        "color": None,
++        "badge": None,
++        "badges": [],
++        "prestige": 0,
++        "voice_bonus": True,
++        "last_voice_bonus": 0,
++        "afk": False,
++        "afk_reason": None,
++        "married_to": None
++    }
++
++def get_guild_settings(guild_id):
++    settings = load_json(SETTINGS_FILE, {})
++    return settings.setdefault(str(guild_id), default_settings()), settings
++
++def get_level_data(guild_id):
++    levels = load_json(LEVEL_FILE, {})
++    return levels.setdefault(str(guild_id), {}), levels
++
++def get_economy_data(guild_id):
++    economy = load_json(ECONOMY_FILE, {})
++    return economy.setdefault(str(guild_id), {}), economy
++
++def ensure_user_economy(economy_guild, user_id):
++    return economy_guild.setdefault(str(user_id), default_economy_user())
++
++SHOP_BACKGROUNDS = {
++    "Galaxy": 500,
++    "Neon": 750,
++    "Forest": 300
++}
++
++EIGHT_BALL_RESPONSES = [
++    "It is certain.",
++    "Without a doubt.",
++    "Yes - definitely.",
++    "Reply hazy, try again.",
++    "Ask again later.",
++    "Better not tell you now.",
++    "My sources say no.",
++    "Very doubtful.",
++    "Absolutely!",
++    "Don't count on it."
++]
++
++CONVERSATION_STARTERS = [
++    "Pineapple on pizza — yes or no?",
++    "What's a movie you could watch 10 times?",
++    "If you could time travel, where would you go?",
++    "What's your go-to comfort food?",
++    "Cats or dogs — which team are you on?"
++]
++
++WOULD_YOU_RATHER = [
++    "Would you rather be able to fly or be invisible?",
++    "Would you rather never need sleep or never need food?",
++    "Would you rather explore space or the deep ocean?",
++    "Would you rather have super strength or super speed?",
++    "Would you rather live without music or without movies?"
++]
++
++DEBATE_TOPICS = [
++    "Is social media good or bad for society?",
++    "Should homework be banned?",
++    "Is it better to be early or right on time?",
++    "Are videogames a sport?",
++    "Should you separate art from the artist?"
++]
++
+ # ================== READY ==================
+ @bot.event
+ async def on_ready():
+     print("🔄 Syncing commands globally...")
+ 
+     try:
+         synced = await tree.sync()  # Global sync (no guild wipe)
+         print(f"✅ Synced {len(synced)} commands globally")
+     except Exception as e:
+         print(f"❌ Sync error: {e}")
+ 
+     auto_update.start()
+     print(f"🤖 Logged in as {bot.user}")
+ 
+ 
+ # ======================================================
+ # ================== ROLE TRACKING =====================
+ # ======================================================
+ def role_count(role):
+     return sum(1 for m in role.guild.members if role in m.roles)
+ 
+ def role_embed(role):
+     return discord.Embed(
+         title="📊 Role Count",
+         description=f"{role.mention}\n👥 Members: {role_count(role)}",
+@@ -115,87 +200,135 @@ async def create_levelup_image(member, level, bg_path):
+ 
+     try:
+         font = ImageFont.truetype("arialbd.ttf", 48)
+     except:
+         font = ImageFont.load_default()
+ 
+     draw.text((250, 70), f"{member.display_name} reached Level {level}!", font=font, fill=(255,255,255))
+ 
+     avatar = member.display_avatar.with_size(128)
+     buf = io.BytesIO()
+     await avatar.save(buf)
+     buf.seek(0)
+     av = Image.open(buf).resize((120,120))
+     bg.paste(av,(50,40),av)
+ 
+     out = io.BytesIO()
+     bg.save(out,"PNG")
+     out.seek(0)
+     return out
+ 
+ @bot.event
+ async def on_message(message):
+     if message.author.bot or not message.guild:
+         return
+ 
+-    settings = load_json(SETTINGS_FILE, {})
+-    levels = load_json(LEVEL_FILE, {})
+-
+-    gset = settings.setdefault(str(message.guild.id), default_settings())
+-    glevels = levels.setdefault(str(message.guild.id), {})
++    gset, settings = get_guild_settings(message.guild.id)
++    glevels, levels = get_level_data(message.guild.id)
++    economy_guild, economy = get_economy_data(message.guild.id)
++    econ_user = ensure_user_economy(economy_guild, message.author.id)
+     user = glevels.setdefault(str(message.author.id), {"xp": 0, "level": 1, "last": 0})
+ 
+     if str(message.channel.id) in gset["ignored_channels"]:
+         return
+ 
+     if time.time() - user["last"] < gset["cooldown"]:
+         return
+ 
+     user["last"] = time.time()
+-    user["xp"] += random.randint(*gset["xp_range"])
++    gained_xp = random.randint(*gset["xp_range"])
++    gained_xp = int(gained_xp * gset.get("xp_multiplier", 1.0))
++    user["xp"] += gained_xp
+ 
+     if user["xp"] >= xp_needed(user["level"]):
+         user["xp"] -= xp_needed(user["level"])
+         user["level"] += 1
+ 
+         reward = gset["role_rewards"].get(str(user["level"]))
+         if reward:
+             role = message.guild.get_role(int(reward))
+             if role:
+                 await message.author.add_roles(role)
+ 
+-        img = await create_levelup_image(message.author, user["level"], gset.get("levelup_bg"))
+-
+-        await message.channel.send(
+-            f"🎉 {message.author.mention} reached Level {user['level']}!",
+-            file=discord.File(img, "levelup.png")
+-        )
++        level_notify = gset.get("level_notify", {}).get(str(message.author.id), True)
++        if level_notify:
++            img = await create_levelup_image(message.author, user["level"], gset.get("levelup_bg"))
++            level_channel_id = gset.get("level_channel")
++            level_channel = message.guild.get_channel(level_channel_id) if level_channel_id else message.channel
++            await level_channel.send(
++                f"🎉 {message.author.mention} reached Level {user['level']}!",
++                file=discord.File(img, "levelup.png")
++            )
+ 
+     save_json(LEVEL_FILE, levels)
+     save_json(SETTINGS_FILE, settings)
++    save_json(ECONOMY_FILE, economy)
++
++    if econ_user.get("afk"):
++        econ_user["afk"] = False
++        econ_user["afk_reason"] = None
++        save_json(ECONOMY_FILE, economy)
++        await message.channel.send(f"👋 Welcome back, {message.author.mention}! Your AFK is now off.")
++
++    if message.mentions:
++        afk_mentions = []
++        for mentioned in message.mentions:
++            mentioned_data = ensure_user_economy(economy_guild, mentioned.id)
++            if mentioned_data.get("afk"):
++                reason = mentioned_data.get("afk_reason") or "No reason provided."
++                afk_mentions.append(f"{mentioned.display_name} is AFK: {reason}")
++        if afk_mentions:
++            await message.channel.send("\n".join(afk_mentions))
+     await bot.process_commands(message)
+ 
++@bot.event
++async def on_voice_state_update(member, before, after):
++    if member.bot or not member.guild:
++        return
++
++    if before.channel is None and after.channel is not None:
++        gset, settings = get_guild_settings(member.guild.id)
++        economy_guild, economy = get_economy_data(member.guild.id)
++        econ_user = ensure_user_economy(economy_guild, member.id)
++        if not econ_user.get("voice_bonus", True):
++            return
++
++        now = time.time()
++        if now - econ_user.get("last_voice_bonus", 0) < gset.get("voice_bonus_cooldown", 300):
++            return
++
++        glevels, levels = get_level_data(member.guild.id)
++        user = glevels.setdefault(str(member.id), {"xp": 0, "level": 1, "last": 0})
++
++        bonus_xp = gset.get("voice_bonus_xp", 10)
++        bonus_xp = int(bonus_xp * gset.get("xp_multiplier", 1.0))
++        user["xp"] += bonus_xp
++        econ_user["last_voice_bonus"] = now
++
++        save_json(LEVEL_FILE, levels)
++        save_json(ECONOMY_FILE, economy)
++
+ # ======================================================
+ # ================== RANK CARD =========================
+ # ======================================================
+ def create_animated_rank_card(member, level, xp, required_xp, avatar_path, bg_path=None):
+     width, height = 800, 250
+     frames = []
+     percent = xp / required_xp if required_xp else 0
+ 
+     avatar = Image.open(avatar_path).resize((180, 180)).convert("RGBA")
+ 
+     for i in range(15):
+         if bg_path and os.path.exists(bg_path):
+             base = Image.open(bg_path).convert("RGB").resize((width,height))
+         else:
+             base = Image.new("RGB",(width,height),(30,30,30))
+ 
+         draw = ImageDraw.Draw(base)
+         bar_width = int(500 * percent * (i/14))
+ 
+         draw.rectangle((250,150,750,190), fill=(50,50,50))
+         draw.rectangle((250,150,250+bar_width,190), fill=(120,0,255))
+ 
+         draw.text((250,50), member.name, fill="white")
+         draw.text((250,90), f"Level {level}", fill="white")
+         draw.text((250,120), f"{xp}/{required_xp} XP", fill="white")
+@@ -313,29 +446,345 @@ async def removerolereward(interaction: discord.Interaction, level: int):
+         del rewards[str(level)]
+         save_json(SETTINGS_FILE, settings)
+         await interaction.response.send_message("🗑️ Reward removed.", ephemeral=True)
+     else:
+         await interaction.response.send_message("❌ No reward set for that level.", ephemeral=True)
+ 
+ @tree.command(name="rolerewards")
+ async def rolerewards(interaction: discord.Interaction):
+     settings = load_json(SETTINGS_FILE, {})
+     gid = str(interaction.guild.id)
+     rewards = settings.get(gid, {}).get("role_rewards", {})
+ 
+     if not rewards:
+         await interaction.response.send_message("No level rewards set yet.", ephemeral=True)
+         return
+ 
+     desc = ""
+     for level, role_id in sorted(rewards.items(), key=lambda x: int(x[0])):
+         role = interaction.guild.get_role(int(role_id))
+         if role:
+             desc += f"Level {level} → {role.mention}\n"
+ 
+     embed = discord.Embed(title="🎖️ Level Role Rewards", description=desc, color=discord.Color.green())
+     await interaction.response.send_message(embed=embed)
+ 
 
++# ======================================================
++# ================== NEW COMMANDS ======================
++# ======================================================
+ 
++@tree.command(name="daily", description="Claim daily XP and coins")
++async def daily(interaction: discord.Interaction):
++    glevels, levels = get_level_data(interaction.guild.id)
++    economy_guild, economy = get_economy_data(interaction.guild.id)
++    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
++    user = glevels.setdefault(str(interaction.user.id), {"xp": 0, "level": 1, "last": 0})
+ 
++    now = time.time()
++    if now - econ_user["last_daily"] < 86400:
++        await interaction.response.send_message("⏳ You already claimed your daily. Come back later!", ephemeral=True)
++        return
++
++    if now - econ_user["last_daily"] < 172800:
++        econ_user["daily_streak"] += 1
++    else:
++        econ_user["daily_streak"] = 1
++
++    base_coins = 100
++    base_xp = 50
++    bonus = 0
++    if econ_user["daily_streak"] % 7 == 0:
++        bonus = 50
++
++    econ_user["coins"] += base_coins + bonus
++    user["xp"] += base_xp + bonus
++    econ_user["last_daily"] = now
++
++    save_json(LEVEL_FILE, levels)
++    save_json(ECONOMY_FILE, economy)
++
++    await interaction.response.send_message(
++        f"✅ Daily claimed! +{base_coins + bonus} coins, +{base_xp + bonus} XP. 🔥 Streak: {econ_user['daily_streak']}"
++    )
++
++@tree.command(name="rep", description="Give a reputation point to someone")
++async def rep(interaction: discord.Interaction, member: discord.Member):
++    if member.bot or member.id == interaction.user.id:
++        await interaction.response.send_message("❌ You can't give rep to that user.", ephemeral=True)
++        return
++
++    economy_guild, economy = get_economy_data(interaction.guild.id)
++    giver = ensure_user_economy(economy_guild, interaction.user.id)
++    receiver = ensure_user_economy(economy_guild, member.id)
++
++    now = time.time()
++    if now - giver["rep_last"] < 86400:
++        await interaction.response.send_message("⏳ You already gave rep today.", ephemeral=True)
++        return
++
++    receiver["rep"] += 1
++    giver["rep_last"] = now
++    save_json(ECONOMY_FILE, economy)
++    await interaction.response.send_message(f"👍 {member.mention} received a rep point!")
++
++@tree.command(name="coinflip", description="50/50 gamble for XP")
++async def coinflip(interaction: discord.Interaction):
++    glevels, levels = get_level_data(interaction.guild.id)
++    user = glevels.setdefault(str(interaction.user.id), {"xp": 0, "level": 1, "last": 0})
++    win = random.choice([True, False])
++    if win:
++        user["xp"] += 25
++        result = "🎉 You won! +25 XP"
++    else:
++        result = "😅 You lost! Better luck next time."
++    save_json(LEVEL_FILE, levels)
++    await interaction.response.send_message(result)
++
++@tree.command(name="8ball", description="Ask the magic 8-ball")
++async def eight_ball(interaction: discord.Interaction, question: str):
++    response = random.choice(EIGHT_BALL_RESPONSES)
++    await interaction.response.send_message(f"🎱 {response}")
++
++@tree.command(name="meme", description="Grab a random meme")
++async def meme(interaction: discord.Interaction):
++    import aiohttp
++    async with aiohttp.ClientSession() as session:
++        async with session.get("https://meme-api.com/gimme") as resp:
++            if resp.status != 200:
++                await interaction.response.send_message("❌ Couldn't fetch a meme right now.")
++                return
++            data = await resp.json()
++    embed = discord.Embed(title=data.get("title", "Meme"), color=discord.Color.random())
++    embed.set_image(url=data.get("url"))
++    await interaction.response.send_message(embed=embed)
++
++@tree.command(name="prestige", description="Prestige when you hit max level")
++async def prestige(interaction: discord.Interaction):
++    glevels, levels = get_level_data(interaction.guild.id)
++    gset, settings = get_guild_settings(interaction.guild.id)
++    economy_guild, economy = get_economy_data(interaction.guild.id)
++    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
++    user = glevels.setdefault(str(interaction.user.id), {"xp": 0, "level": 1, "last": 0})
++
++    if user["level"] < gset.get("max_level", 100):
++        await interaction.response.send_message("❌ You haven't hit max level yet.", ephemeral=True)
++        return
++
++    econ_user["prestige"] += 1
++    badge = f"Prestige {econ_user['prestige']}"
++    if badge not in econ_user["badges"]:
++        econ_user["badges"].append(badge)
++    user["level"] = 1
++    user["xp"] = 0
++
++    save_json(LEVEL_FILE, levels)
++    save_json(ECONOMY_FILE, economy)
++    save_json(SETTINGS_FILE, settings)
++    await interaction.response.send_message(f"⭐ Prestige unlocked! You are now {badge}.")
++
++@tree.command(name="levelroles", description="Show level role rewards")
++async def levelroles(interaction: discord.Interaction):
++    settings = load_json(SETTINGS_FILE, {})
++    gid = str(interaction.guild.id)
++    rewards = settings.get(gid, {}).get("role_rewards", {})
++
++    if not rewards:
++        await interaction.response.send_message("No level rewards set yet.", ephemeral=True)
++        return
++
++    desc = ""
++    for level, role_id in sorted(rewards.items(), key=lambda x: int(x[0])):
++        role = interaction.guild.get_role(int(role_id))
++        if role:
++            desc += f"Level {level} → {role.mention}\n"
++
++    embed = discord.Embed(title="🏆 Level Role Rewards", description=desc, color=discord.Color.blurple())
++    await interaction.response.send_message(embed=embed)
++
++@tree.command(name="levelnotify", description="Toggle level-up messages")
++async def levelnotify(interaction: discord.Interaction):
++    gset, settings = get_guild_settings(interaction.guild.id)
++    notify = gset.setdefault("level_notify", {}).get(str(interaction.user.id), True)
++    gset["level_notify"][str(interaction.user.id)] = not notify
++    save_json(SETTINGS_FILE, settings)
++    status = "ON" if gset["level_notify"][str(interaction.user.id)] else "OFF"
++    await interaction.response.send_message(f"🔔 Level-up messages are now {status}.", ephemeral=True)
++
++@tree.command(name="backgrounds", description="Show unlocked rank backgrounds")
++async def backgrounds(interaction: discord.Interaction):
++    economy_guild, _ = get_economy_data(interaction.guild.id)
++    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
++    owned = econ_user.get("backgrounds", [])
++    if not owned:
++        await interaction.response.send_message("You don't own any backgrounds yet.", ephemeral=True)
++        return
++    embed = discord.Embed(title="🎨 Your Backgrounds", description="\n".join(owned), color=discord.Color.purple())
++    await interaction.response.send_message(embed=embed)
++
++@tree.command(name="question", description="Random conversation starter")
++async def question(interaction: discord.Interaction):
++    await interaction.response.send_message(random.choice(CONVERSATION_STARTERS))
++
++@tree.command(name="wouldyourather", description="Random would-you-rather question")
++async def wouldyourather(interaction: discord.Interaction):
++    await interaction.response.send_message(random.choice(WOULD_YOU_RATHER))
++
++@tree.command(name="topic", description="Random debate topic")
++async def topic(interaction: discord.Interaction):
++    await interaction.response.send_message(random.choice(DEBATE_TOPICS))
++
++@tree.command(name="setlevelchannel", description="Set where level-up messages post")
++@app_commands.checks.has_permissions(administrator=True)
++async def setlevelchannel(interaction: discord.Interaction, channel: discord.TextChannel):
++    gset, settings = get_guild_settings(interaction.guild.id)
++    gset["level_channel"] = channel.id
++    save_json(SETTINGS_FILE, settings)
++    await interaction.response.send_message(f"✅ Level-up channel set to {channel.mention}", ephemeral=True)
++
++@tree.command(name="setxpmultiplier", description="Set XP multiplier")
++@app_commands.checks.has_permissions(administrator=True)
++async def setxpmultiplier(interaction: discord.Interaction, multiplier: float):
++    gset, settings = get_guild_settings(interaction.guild.id)
++    gset["xp_multiplier"] = max(0.1, min(multiplier, 5.0))
++    save_json(SETTINGS_FILE, settings)
++    await interaction.response.send_message(f"✅ XP multiplier set to {gset['xp_multiplier']}x", ephemeral=True)
++
++@tree.command(name="blacklistxp", description="Block XP farming in a channel")
++@app_commands.checks.has_permissions(administrator=True)
++async def blacklistxp(interaction: discord.Interaction, channel: discord.TextChannel):
++    gset, settings = get_guild_settings(interaction.guild.id)
++    if str(channel.id) not in gset["ignored_channels"]:
++        gset["ignored_channels"].append(str(channel.id))
++    save_json(SETTINGS_FILE, settings)
++    await interaction.response.send_message(f"🚫 XP disabled in {channel.mention}", ephemeral=True)
++
++@tree.command(name="resetuserxp", description="Reset a user's XP and level")
++@app_commands.checks.has_permissions(administrator=True)
++async def resetuserxp(interaction: discord.Interaction, member: discord.Member):
++    glevels, levels = get_level_data(interaction.guild.id)
++    glevels[str(member.id)] = {"xp": 0, "level": 1, "last": 0}
++    save_json(LEVEL_FILE, levels)
++    await interaction.response.send_message(f"♻️ Reset XP for {member.mention}", ephemeral=True)
++
++@tree.command(name="balance", description="Check your coin balance")
++async def balance(interaction: discord.Interaction, member: Optional[discord.Member] = None):
++    member = member or interaction.user
++    economy_guild, _ = get_economy_data(interaction.guild.id)
++    econ_user = ensure_user_economy(economy_guild, member.id)
++    await interaction.response.send_message(f"💰 {member.display_name} has {econ_user['coins']} coins.")
++
++@tree.command(name="work", description="Earn coins every hour")
++async def work(interaction: discord.Interaction):
++    economy_guild, economy = get_economy_data(interaction.guild.id)
++    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
++    now = time.time()
++    if now - econ_user["last_work"] < 3600:
++        await interaction.response.send_message("⏳ You already worked recently. Try later!", ephemeral=True)
++        return
++    earned = random.randint(50, 150)
++    econ_user["coins"] += earned
++    econ_user["last_work"] = now
++    save_json(ECONOMY_FILE, economy)
++    await interaction.response.send_message(f"🛠️ You earned {earned} coins!")
++
++@tree.command(name="shop", description="View the shop")
++async def shop(interaction: discord.Interaction):
++    lines = [f"**{name}** — {price} coins" for name, price in SHOP_BACKGROUNDS.items()]
++    embed = discord.Embed(title="🛒 Background Shop", description="\n".join(lines), color=discord.Color.gold())
++    await interaction.response.send_message(embed=embed)
++
++@tree.command(name="buybackground", description="Buy a rank background")
++async def buybackground(interaction: discord.Interaction, background: str):
++    background = background.title()
++    if background not in SHOP_BACKGROUNDS:
++        await interaction.response.send_message("❌ That background isn't in the shop.", ephemeral=True)
++        return
++    economy_guild, economy = get_economy_data(interaction.guild.id)
++    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
++    price = SHOP_BACKGROUNDS[background]
++    if econ_user["coins"] < price:
++        await interaction.response.send_message("❌ You don't have enough coins.", ephemeral=True)
++        return
++    if background in econ_user["backgrounds"]:
++        await interaction.response.send_message("✅ You already own that background.", ephemeral=True)
++        return
++    econ_user["coins"] -= price
++    econ_user["backgrounds"].append(background)
++    save_json(ECONOMY_FILE, economy)
++    await interaction.response.send_message(f"🎉 You bought the **{background}** background!")
++
++@tree.command(name="setcolor", description="Set your rank card accent color (hex)")
++async def setcolor(interaction: discord.Interaction, color_hex: str):
++    if not color_hex.startswith("#") or len(color_hex) not in (4, 7):
++        await interaction.response.send_message("❌ Provide a hex color like #ff00ff.", ephemeral=True)
++        return
++    economy_guild, economy = get_economy_data(interaction.guild.id)
++    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
++    econ_user["color"] = color_hex
++    save_json(ECONOMY_FILE, economy)
++    await interaction.response.send_message(f"🎨 Color updated to {color_hex}.", ephemeral=True)
++
++@tree.command(name="setbadge", description="Choose a badge to display")
++async def setbadge(interaction: discord.Interaction, badge: str):
++    economy_guild, economy = get_economy_data(interaction.guild.id)
++    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
++    if badge not in econ_user.get("badges", []):
++        await interaction.response.send_message("❌ You don't own that badge.", ephemeral=True)
++        return
++    econ_user["badge"] = badge
++    save_json(ECONOMY_FILE, economy)
++    await interaction.response.send_message(f"🏅 Badge set to **{badge}**.", ephemeral=True)
++
++@tree.command(name="profile", description="View a user's profile")
++async def profile(interaction: discord.Interaction, member: Optional[discord.Member] = None):
++    member = member or interaction.user
++    glevels, _ = get_level_data(interaction.guild.id)
++    economy_guild, _ = get_economy_data(interaction.guild.id)
++    econ_user = ensure_user_economy(economy_guild, member.id)
++    user = glevels.get(str(member.id), {"xp": 0, "level": 1})
++
++    embed = discord.Embed(title=f"{member.display_name}'s Profile", color=discord.Color.blue())
++    embed.add_field(name="Level", value=str(user.get("level", 1)))
++    embed.add_field(name="XP", value=str(user.get("xp", 0)))
++    embed.add_field(name="Coins", value=str(econ_user.get("coins", 0)))
++    embed.add_field(name="Rep", value=str(econ_user.get("rep", 0)))
++    embed.add_field(name="Prestige", value=str(econ_user.get("prestige", 0)))
++    embed.add_field(name="Badge", value=econ_user.get("badge") or "None", inline=True)
++    embed.add_field(name="Color", value=econ_user.get("color") or "Default", inline=True)
++    embed.add_field(name="Married To", value=f"<@{econ_user['married_to']}>" if econ_user.get("married_to") else "None", inline=True)
++    await interaction.response.send_message(embed=embed)
++
++@tree.command(name="voicebonus", description="Toggle voice bonus XP")
++async def voicebonus(interaction: discord.Interaction):
++    economy_guild, economy = get_economy_data(interaction.guild.id)
++    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
++    econ_user["voice_bonus"] = not econ_user.get("voice_bonus", True)
++    save_json(ECONOMY_FILE, economy)
++    status = "ON" if econ_user["voice_bonus"] else "OFF"
++    await interaction.response.send_message(f"🎧 Voice bonus is now {status}.", ephemeral=True)
++
++@tree.command(name="afk", description="Set your AFK status")
++async def afk(interaction: discord.Interaction, reason: Optional[str] = None):
++    economy_guild, economy = get_economy_data(interaction.guild.id)
++    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
++    econ_user["afk"] = True
++    econ_user["afk_reason"] = reason
++    save_json(ECONOMY_FILE, economy)
++    await interaction.response.send_message("😴 You're now AFK.", ephemeral=True)
++
++@tree.command(name="marry", description="Marry another user")
++async def marry(interaction: discord.Interaction, member: discord.Member):
++    if member.bot or member.id == interaction.user.id:
++        await interaction.response.send_message("❌ You can't marry that user.", ephemeral=True)
++        return
++    economy_guild, economy = get_economy_data(interaction.guild.id)
++    user = ensure_user_economy(economy_guild, interaction.user.id)
++    partner = ensure_user_economy(economy_guild, member.id)
++    if user.get("married_to") or partner.get("married_to"):
++        await interaction.response.send_message("💔 Someone is already married.", ephemeral=True)
++        return
++    user["married_to"] = member.id
++    partner["married_to"] = interaction.user.id
++    save_json(ECONOMY_FILE, economy)
++    await interaction.response.send_message(f"💍 {interaction.user.mention} and {member.mention} are now married!"
+ 
+EOF
+)
 # ================== RUN ==================
 bot.run(os.getenv("DISCORD_TOKEN"))
 
