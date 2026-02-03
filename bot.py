@@ -341,11 +341,7 @@ async def rolerewards(interaction: discord.Interaction):
 
     embed = discord.Embed(title="🎖️ Level Role Rewards", description=desc, color=discord.Color.green())
     await interaction.response.send_message(embed=embed)
-reward = gset["role_rewards"].get(str(user["level"]))
-if reward:
-    role = message.guild.get_role(int(reward))
-    if role:
-        await message.author.add_roles(role)
+
 
 # ================== RUN ==================
 bot.run(os.getenv("DISCORD_TOKEN"))
