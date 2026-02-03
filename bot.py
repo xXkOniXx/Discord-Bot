@@ -130,33 +130,34 @@ async def on_message(message):
     settings = load_json(SETTINGS_FILE, {})
     levels = load_json(LEVEL_FILE, {})
 
-    gid = str(message.guild.id)
-    uid = str(message.author.id)
+    gset = settings.setdefault(str(message.guild.id), default_settings())
+    glevels = levels.setdefault(str(message.guild.id), {})
+    user = glevels.setdefault(str(message.author.id), {"xp": 0, "level": 1, "last": 0})
 
-    gset = settings.setdefault(gid, default_settings())
-    glevels = levels.setdefault(gid, {})
-    user = glevels.setdefault(uid, {"xp":0,"level":1,"last":0})
-
+    # 🚫 Ignored channels
     if str(message.channel.id) in gset["ignored_channels"]:
         return
+
+    # ⏳ Cooldown check
     if time.time() - user["last"] < gset["cooldown"]:
         return
 
     user["last"] = time.time()
     user["xp"] += random.randint(*gset["xp_range"])
 
-     if user["xp"] >= xp_needed(user["level"]):
+    # 🎉 LEVEL UP CHECK
+    if user["xp"] >= xp_needed(user["level"]):
         user["xp"] -= xp_needed(user["level"])
         user["level"] += 1
 
-        # 🎁 ROLE REWARD
+        # 🎁 Role reward
         reward = gset["role_rewards"].get(str(user["level"]))
         if reward:
             role = message.guild.get_role(int(reward))
             if role:
                 await message.author.add_roles(role)
 
-        # 🖼️ LEVEL UP IMAGE
+        # 🖼️ Level-up image
         img = await create_levelup_image(
             message.author,
             user["level"],
@@ -167,6 +168,12 @@ async def on_message(message):
             f"🎉 {message.author.mention} reached **Level {user['level']}!**",
             file=discord.File(img, "levelup.png")
         )
+
+    save_json(LEVEL_FILE, levels)
+    save_json(SETTINGS_FILE, settings)
+
+    await bot.process_commands(message)
+
 
 
 # ======================================================
