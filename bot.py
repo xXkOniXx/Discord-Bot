@@ -60,6 +60,7 @@ def default_economy_user():
         "last_daily": 0,
         "daily_streak": 0,
         "last_work": 0,
+        "last_heist": 0,
         "backgrounds": [],
         "color": None,
         "badge": None,
@@ -130,6 +131,14 @@ DEBATE_TOPICS = [
     "Should you separate art from the artist?"
 ]
 
+HEIST_TRIVIA = [
+    {"q": "What planet is known as the Red Planet?", "a": "mars"},
+    {"q": "How many continents are there on Earth?", "a": "7"},
+    {"q": "What is the capital of France?", "a": "paris"},
+    {"q": "Which ocean is the largest?", "a": "pacific"},
+    {"q": "What is 5 + 7?", "a": "12"}
+]
+
 # ================== READY ==================
 @bot.event
 async def on_ready():
@@ -142,6 +151,7 @@ async def on_ready():
         print(f"❌ Sync error: {e}")
 
     auto_update.start()
+    auto_update_tracked_list.start()
     print(f"🤖 Logged in as {bot.user}")
 
 
@@ -158,6 +168,23 @@ def role_embed(role):
         color=role.color if role.color.value else discord.Color.blurple()
     )
 
+def tracked_role_ids(data, gid):
+    return [int(rid) for rid in data.get(gid, {}) if rid.isdigit()]
+
+def tracked_roles_list_embed(guild, role_ids):
+    desc_lines = []
+    for rid in role_ids:
+        role = guild.get_role(rid)
+        if role:
+            desc_lines.append(f"{role.mention} — {role_count(role)} members")
+    if not desc_lines:
+        desc_lines = ["No roles are currently tracked."]
+    return discord.Embed(
+        title="📌 Tracked Roles",
+        description="\n".join(desc_lines),
+        color=discord.Color.blurple()
+    )
+
 @tree.command(name="trackrole")
 @app_commands.checks.has_permissions(administrator=True)
 async def trackrole(interaction: discord.Interaction, role: discord.Role):
@@ -171,12 +198,65 @@ async def trackrole(interaction: discord.Interaction, role: discord.Role):
     save_json(TRACKED_FILE, data)
     await interaction.response.send_message("✅ Role tracked", ephemeral=True)
 
+@tree.command(name="untrackrole")
+@app_commands.checks.has_permissions(administrator=True)
+async def untrackrole(interaction: discord.Interaction, role: discord.Role):
+    data = load_json(TRACKED_FILE)
+    gid = str(interaction.guild.id)
+    if str(role.id) in data.get(gid, {}):
+        del data[gid][str(role.id)]
+        save_json(TRACKED_FILE, data)
+        await interaction.response.send_message("✅ Role untracked.", ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ That role isn't tracked.", ephemeral=True)
+
+@tree.command(name="trackrolelist")
+@app_commands.checks.has_permissions(administrator=True)
+async def trackrolelist(interaction: discord.Interaction):
+    data = load_json(TRACKED_FILE)
+    gid = str(interaction.guild.id)
+    role_ids = tracked_role_ids(data, gid)
+    embed = tracked_roles_list_embed(interaction.guild, role_ids)
+
+    msg = await interaction.channel.send(embed=embed)
+    data.setdefault(gid, {})["_list"] = {"channel": interaction.channel.id, "message": msg.id}
+    save_json(TRACKED_FILE, data)
+    await interaction.response.send_message("✅ Tracking list posted and will update every 5 minutes.", ephemeral=True)
+
+@tree.command(name="trackroleall")
+@app_commands.checks.has_permissions(administrator=True)
+async def trackroleall(interaction: discord.Interaction):
+    data = load_json(TRACKED_FILE)
+    gid = str(interaction.guild.id)
+    data.setdefault(gid, {})
+    for role in interaction.guild.roles:
+        if role.is_default():
+            continue
+        msg = await interaction.channel.send(embed=role_embed(role))
+        data[gid][str(role.id)] = {"channel": interaction.channel.id, "message": msg.id}
+    save_json(TRACKED_FILE, data)
+    await interaction.response.send_message("✅ All roles are now tracked.", ephemeral=True)
+
+@tree.command(name="untrackroleall")
+@app_commands.checks.has_permissions(administrator=True)
+async def untrackroleall(interaction: discord.Interaction):
+    data = load_json(TRACKED_FILE)
+    gid = str(interaction.guild.id)
+    list_info = data.get(gid, {}).get("_list")
+    data[gid] = {}
+    if list_info:
+        data[gid]["_list"] = list_info
+    save_json(TRACKED_FILE, data)
+    await interaction.response.send_message("✅ All roles untracked.", ephemeral=True)
+
 @tasks.loop(minutes=10)
 async def auto_update():
     data = load_json(TRACKED_FILE)
     for guild in bot.guilds:
         gid = str(guild.id)
         for rid, info in data.get(gid, {}).items():
+            if not rid.isdigit():
+                continue
             role = guild.get_role(int(rid))
             if not role:
                 continue
@@ -186,6 +266,22 @@ async def auto_update():
                 await msg.edit(embed=role_embed(role))
             except:
                 pass
+
+@tasks.loop(minutes=5)
+async def auto_update_tracked_list():
+    data = load_json(TRACKED_FILE)
+    for guild in bot.guilds:
+        gid = str(guild.id)
+        list_info = data.get(gid, {}).get("_list")
+        if not list_info:
+            continue
+        role_ids = tracked_role_ids(data, gid)
+        try:
+            ch = guild.get_channel(list_info["channel"])
+            msg = await ch.fetch_message(list_info["message"])
+            await msg.edit(embed=tracked_roles_list_embed(guild, role_ids))
+        except:
+            pass
 
 # ======================================================
 # ================== LEVEL SYSTEM ======================
@@ -787,5 +883,75 @@ async def marry(interaction: discord.Interaction, member: discord.Member):
     save_json(ECONOMY_FILE, economy)
     await interaction.response.send_message(f"💍 {interaction.user.mention} and {member.mention} are now married!")
 
+@tree.command(name="divorce", description="Divorce your partner (costs 500 coins)")
+async def divorce(interaction: discord.Interaction):
+    economy_guild, economy = get_economy_data(interaction.guild.id)
+    user = ensure_user_economy(economy_guild, interaction.user.id)
+    if not user.get("married_to"):
+        await interaction.response.send_message("❌ You're not married to anyone.", ephemeral=True)
+        return
+    if user["coins"] < 500:
+        await interaction.response.send_message("❌ You need 500 coins to file for divorce.", ephemeral=True)
+        return
+    partner_id = user["married_to"]
+    partner = ensure_user_economy(economy_guild, partner_id)
+    user["coins"] -= 500
+    user["married_to"] = None
+    partner["married_to"] = None
+    save_json(ECONOMY_FILE, economy)
+    await interaction.response.send_message(
+        "💔 How could you! you dirty bastard whyd you cheat?! thats it if i cant have you nobody can! *grabs shotgun*"
+    )
+
+@tree.command(name="gamblerist", description="50/50 chance to gain or lose 500 coins")
+async def gamblerist(interaction: discord.Interaction):
+    economy_guild, economy = get_economy_data(interaction.guild.id)
+    user = ensure_user_economy(economy_guild, interaction.user.id)
+    win = random.choice([True, False])
+    if win:
+        user["coins"] += 500
+        result = "🎲 You won! +500 coins"
+    else:
+        user["coins"] -= 500
+        result = "🎲 You lost! -500 coins"
+    save_json(ECONOMY_FILE, economy)
+    await interaction.response.send_message(result)
+
+@tree.command(name="koniheist", description="Answer a trivia question for 900 coins (20 min cooldown)")
+async def koniheist(interaction: discord.Interaction):
+    economy_guild, economy = get_economy_data(interaction.guild.id)
+    user = ensure_user_economy(economy_guild, interaction.user.id)
+    now = time.time()
+    if now - user.get("last_heist", 0) < 1200:
+        await interaction.response.send_message("⏳ The heist is on cooldown. Try again later!", ephemeral=True)
+        return
+
+    trivia = random.choice(HEIST_TRIVIA)
+    await interaction.response.send_message(f"🚨 Koni Heist! Answer in 10s: **{trivia['q']}**")
+
+    def check(msg):
+        return msg.author.id == interaction.user.id and msg.channel.id == interaction.channel.id
+
+    try:
+        msg = await bot.wait_for("message", timeout=10.0, check=check)
+    except:
+        user["coins"] -= 300
+        user["last_heist"] = now
+        save_json(ECONOMY_FILE, economy)
+        await interaction.followup.send("🚔 You got caught by the police! -300 coins.")
+        return
+
+    if msg.content.strip().lower() == trivia["a"]:
+        user["coins"] += 900
+        user["last_heist"] = now
+        save_json(ECONOMY_FILE, economy)
+        await interaction.followup.send("💰 Heist success! +900 coins.")
+    else:
+        user["coins"] -= 300
+        user["last_heist"] = now
+        save_json(ECONOMY_FILE, economy)
+        await interaction.followup.send("🚔 Wrong answer! You got caught by the police! -300 coins.")
+
 # ================== RUN ==================
 bot.run(os.getenv("DISCORD_TOKEN"))
+
