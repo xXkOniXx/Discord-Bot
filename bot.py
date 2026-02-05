@@ -213,6 +213,13 @@ def command_lookup(name):
         if cmd["name"] == name:
             return cmd
     return None
+
+async def send_response(interaction, content=None, embed=None, ephemeral=False, file=None):
+    if interaction.response.is_done():
+        await interaction.followup.send(content=content, embed=embed, ephemeral=ephemeral, file=file)
+    else:
+        await interaction.response.send_message(content=content, embed=embed, ephemeral=ephemeral, file=file)
+
 ROAST_LINES = [
     "If laughs were XP, you'd still be level 1.",
     "You're the human version of a loading screen.",
@@ -771,35 +778,35 @@ class HelpView(discord.ui.View):
 
     @discord.ui.button(label="Daily", style=discord.ButtonStyle.primary, emoji="🎁")
     async def daily_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await daily(interaction)
+        await tree.get_command("daily").callback(interaction)
 
     @discord.ui.button(label="Coinflip", style=discord.ButtonStyle.secondary, emoji="🪙")
     async def coinflip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await coinflip(interaction)
+        await tree.get_command("coinflip").callback(interaction)
 
     @discord.ui.button(label="Meme", style=discord.ButtonStyle.secondary, emoji="😂")
     async def meme_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await meme(interaction)
+        await tree.get_command("meme").callback(interaction)
 
     @discord.ui.button(label="Question", style=discord.ButtonStyle.secondary, emoji="❓")
     async def question_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await question(interaction)
+        await tree.get_command("question").callback(interaction)
 
     @discord.ui.button(label="Would You Rather", style=discord.ButtonStyle.secondary, emoji="🤔")
     async def wyr_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await wouldyourather(interaction)
+        await tree.get_command("wouldyourather").callback(interaction)
 
     @discord.ui.button(label="Topic", style=discord.ButtonStyle.secondary, emoji="💬")
     async def topic_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await topic(interaction)
+        await tree.get_command("topic").callback(interaction)
 
     @discord.ui.button(label="Balance", style=discord.ButtonStyle.secondary, emoji="💰")
     async def balance_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await balance(interaction)
+        await tree.get_command("balance").callback(interaction)
 
     @discord.ui.button(label="Work", style=discord.ButtonStyle.secondary, emoji="🛠️")
     async def work_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await work(interaction)
+        await tree.get_command("work").callback(interaction)
 
 # ======================================================
 # ================== LEVEL SYSTEM ======================
@@ -1095,7 +1102,7 @@ async def daily(interaction: discord.Interaction):
 
     now = time.time()
     if now - econ_user["last_daily"] < 86400:
-        await interaction.response.send_message("⏳ You already claimed your daily. Come back later!", ephemeral=True)
+        await send_response(interaction, "⏳ You already claimed your daily. Come back later!", ephemeral=True)
         return
 
     if now - econ_user["last_daily"] < 172800:
@@ -1116,7 +1123,8 @@ async def daily(interaction: discord.Interaction):
     save_json(LEVEL_FILE, levels)
     save_json(ECONOMY_FILE, economy)
 
-    await interaction.response.send_message(
+    await send_response(
+        interaction,
         f"✅ Daily claimed! +{base_coins + bonus} coins, +{base_xp + bonus} XP. 🔥 Streak: {econ_user['daily_streak']}"
     )
 
@@ -1151,7 +1159,7 @@ async def coinflip(interaction: discord.Interaction):
     else:
         result = "😅 You lost! Better luck next time."
     save_json(LEVEL_FILE, levels)
-    await interaction.response.send_message(result)
+    await send_response(interaction, result)
 
 @tree.command(name="8ball", description="Ask the magic 8-ball")
 async def eight_ball(interaction: discord.Interaction, question: str):
@@ -1164,12 +1172,12 @@ async def meme(interaction: discord.Interaction):
     async with aiohttp.ClientSession() as session:
         async with session.get("https://meme-api.com/gimme") as resp:
             if resp.status != 200:
-                await interaction.response.send_message("❌ Couldn't fetch a meme right now.")
+                await send_response(interaction, "❌ Couldn't fetch a meme right now.")
                 return
             data = await resp.json()
     embed = discord.Embed(title=data.get("title", "Meme"), color=discord.Color.random())
     embed.set_image(url=data.get("url"))
-    await interaction.response.send_message(embed=embed)
+    await send_response(interaction, embed=embed)
 
 @tree.command(name="prestige", description="Prestige when you hit max level")
 async def prestige(interaction: discord.Interaction):
@@ -1236,15 +1244,15 @@ async def backgrounds(interaction: discord.Interaction):
 
 @tree.command(name="question", description="Random conversation starter")
 async def question(interaction: discord.Interaction):
-    await interaction.response.send_message(random.choice(CONVERSATION_STARTERS))
+    await send_response(interaction, random.choice(CONVERSATION_STARTERS))
 
 @tree.command(name="wouldyourather", description="Random would-you-rather question")
 async def wouldyourather(interaction: discord.Interaction):
-    await interaction.response.send_message(random.choice(WOULD_YOU_RATHER))
+    await send_response(interaction, random.choice(WOULD_YOU_RATHER))
 
 @tree.command(name="topic", description="Random debate topic")
 async def topic(interaction: discord.Interaction):
-    await interaction.response.send_message(random.choice(DEBATE_TOPICS))
+    await send_response(interaction, random.choice(DEBATE_TOPICS))
 
 @tree.command(name="setlevelchannel", description="Set where level-up messages post")
 @app_commands.checks.has_permissions(administrator=True)
@@ -1284,7 +1292,7 @@ async def balance(interaction: discord.Interaction, member: Optional[discord.Mem
     member = member or interaction.user
     economy_guild, _ = get_economy_data(interaction.guild.id)
     econ_user = ensure_user_economy(economy_guild, member.id)
-    await interaction.response.send_message(f"💰 {member.display_name} has {econ_user['coins']} coins.")
+    await send_response(interaction, f"💰 {member.display_name} has {econ_user['coins']} coins.")
 
 @tree.command(name="work", description="Earn coins every hour")
 async def work(interaction: discord.Interaction):
@@ -1292,13 +1300,13 @@ async def work(interaction: discord.Interaction):
     econ_user = ensure_user_economy(economy_guild, interaction.user.id)
     now = time.time()
     if now - econ_user["last_work"] < 3600:
-        await interaction.response.send_message("⏳ You already worked recently. Try later!", ephemeral=True)
+        await send_response(interaction, "⏳ You already worked recently. Try later!", ephemeral=True)
         return
     earned = random.randint(50, 150)
     econ_user["coins"] += earned
     econ_user["last_work"] = now
     save_json(ECONOMY_FILE, economy)
-    await interaction.response.send_message(f"🛠️ You earned {earned} coins!")
+    await send_response(interaction, f"🛠️ You earned {earned} coins!")
 
 @tree.command(name="shop", description="View the shop")
 async def shop(interaction: discord.Interaction):
@@ -1493,5 +1501,6 @@ async def help_command(interaction: discord.Interaction):
 @bot.command(name="help")
 async def help_prefix(ctx: commands.Context):
     await ctx.send(embed=help_embed(), view=HelpView())
+
 # ================== RUN ==================
 bot.run(os.getenv("DISCORD_TOKEN"))
