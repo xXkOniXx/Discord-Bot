@@ -215,10 +215,14 @@ def command_lookup(name):
     return None
 
 async def send_response(interaction, content=None, embed=None, ephemeral=False, file=None):
+    payload = {"content": content, "embed": embed, "ephemeral": ephemeral}
+    if file is not None:
+        payload["file"] = file
     if interaction.response.is_done():
-        await interaction.followup.send(content=content, embed=embed, ephemeral=ephemeral, file=file)
+        await interaction.followup.send(**payload)
     else:
-        await interaction.response.send_message(content=content, embed=embed, ephemeral=ephemeral, file=file)
+        await interaction.response.send_message(**payload)
+
 
 ROAST_LINES = [
     "If laughs were XP, you'd still be level 1.",
@@ -807,7 +811,6 @@ class HelpView(discord.ui.View):
     @discord.ui.button(label="Work", style=discord.ButtonStyle.secondary, emoji="🛠️")
     async def work_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await tree.get_command("work").callback(interaction)
-
 # ======================================================
 # ================== LEVEL SYSTEM ======================
 # ======================================================
