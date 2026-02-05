@@ -12,7 +12,7 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 tree = bot.tree
 
 # ================== FILES ==================
@@ -137,6 +137,459 @@ HEIST_TRIVIA = [
     {"q": "What is the capital of France?", "a": "paris"},
     {"q": "Which ocean is the largest?", "a": "pacific"},
     {"q": "What is 5 + 7?", "a": "12"}
+]
+
+LAUGH_IMAGE_URL = "https://media.giphy.com/media/10JhviFuU2gWD6/giphy.gif"
+
+HELP_COMMANDS = [
+    {"name": "daily", "usage": "/daily", "desc": "Claim daily XP and coins."},
+    {"name": "rep", "usage": "/rep @user", "desc": "Give a reputation point."},
+    {"name": "coinflip", "usage": "/coinflip", "desc": "50/50 gamble for XP."},
+    {"name": "8ball", "usage": "/8ball <question>", "desc": "Magic 8-ball response."},
+    {"name": "meme", "usage": "/meme", "desc": "Fetch a random meme."},
+    {"name": "question", "usage": "/question", "desc": "Conversation starter."},
+    {"name": "wouldyourather", "usage": "/wouldyourather", "desc": "Random WYR."},
+    {"name": "topic", "usage": "/topic", "desc": "Random debate topic."},
+    {"name": "prestige", "usage": "/prestige", "desc": "Prestige at max level."},
+    {"name": "levelroles", "usage": "/levelroles", "desc": "Show level role rewards."},
+    {"name": "levelnotify", "usage": "/levelnotify", "desc": "Toggle level-up messages."},
+    {"name": "backgrounds", "usage": "/backgrounds", "desc": "Show unlocked backgrounds."},
+    {"name": "setlevelchannel", "usage": "/setlevelchannel #channel", "desc": "Set level-up channel."},
+    {"name": "setxpmultiplier", "usage": "/setxpmultiplier <num>", "desc": "Set XP multiplier."},
+    {"name": "blacklistxp", "usage": "/blacklistxp #channel", "desc": "Block XP in channel."},
+    {"name": "resetuserxp", "usage": "/resetuserxp @user", "desc": "Reset user XP."},
+    {"name": "balance", "usage": "/balance [@user]", "desc": "Check coin balance."},
+    {"name": "work", "usage": "/work", "desc": "Earn coins hourly."},
+    {"name": "shop", "usage": "/shop", "desc": "View shop items."},
+    {"name": "buybackground", "usage": "/buybackground <name>", "desc": "Buy a background."},
+    {"name": "setcolor", "usage": "/setcolor #hex", "desc": "Set rank card color."},
+    {"name": "setbadge", "usage": "/setbadge <badge>", "desc": "Set profile badge."},
+    {"name": "profile", "usage": "/profile [@user]", "desc": "View user profile."},
+    {"name": "voicebonus", "usage": "/voicebonus", "desc": "Toggle voice XP bonus."},
+    {"name": "afk", "usage": "/afk [reason]", "desc": "Set AFK status."},
+    {"name": "marry", "usage": "/marry @user", "desc": "Marry a user."},
+    {"name": "divorce", "usage": "/divorce", "desc": "Divorce for 500 coins."},
+    {"name": "gamblerist", "usage": "/gamblerist", "desc": "50/50 ±500 coins."},
+    {"name": "koniheist", "usage": "/koniheist", "desc": "Trivia heist for coins."},
+    {"name": "roast", "usage": "/roast @user", "desc": "Roast someone."},
+    {"name": "rank", "usage": "/rank [@user]", "desc": "Show rank card."},
+    {"name": "leaderboard", "usage": "/leaderboard", "desc": "Show leaderboard."},
+    {"name": "setxp", "usage": "/setxp <min> <max>", "desc": "Set XP range."},
+    {"name": "setcooldown", "usage": "/setcooldown <seconds>", "desc": "Set XP cooldown."},
+    {"name": "setrankbackground", "usage": "/setrankbackground <image>", "desc": "Set rank background."},
+    {"name": "setlevelupbackground", "usage": "/setlevelupbackground <image>", "desc": "Set level-up background."},
+    {"name": "setrolereward", "usage": "/setrolereward <level> @role", "desc": "Set role reward."},
+    {"name": "removerolereward", "usage": "/removerolereward <level>", "desc": "Remove role reward."},
+    {"name": "rolerewards", "usage": "/rolerewards", "desc": "List role rewards."},
+    {"name": "trackrole", "usage": "/trackrole @role", "desc": "Track a role count."},
+    {"name": "untrackrole", "usage": "/untrackrole @role", "desc": "Untrack a role."},
+    {"name": "trackrolelist", "usage": "/trackrolelist", "desc": "Post tracked roles list."},
+    {"name": "trackroleall", "usage": "/trackroleall", "desc": "Track all roles."},
+    {"name": "untrackroleall", "usage": "/untrackroleall", "desc": "Untrack all roles."}
+]
+
+def help_embed():
+    categories = {
+        "🎮 Fun / Social": ["daily", "rep", "coinflip", "8ball", "meme", "roast"],
+        "🏆 Leveling": ["rank", "leaderboard", "prestige", "levelroles", "levelnotify", "backgrounds"],
+        "💬 Chat Boosters": ["question", "wouldyourather", "topic"],
+        "🛠️ Admin": ["setlevelchannel", "setxpmultiplier", "blacklistxp", "resetuserxp", "setxp", "setcooldown"],
+        "💰 Economy": ["balance", "work", "shop", "buybackground", "gamblerist", "koniheist", "divorce"],
+        "🎨 Cosmetics": ["setcolor", "setbadge", "profile", "voicebonus", "afk", "marry"],
+        "📌 Role Tracking": ["trackrole", "untrackrole", "trackrolelist", "trackroleall", "untrackroleall"],
+        "🖼️ Backgrounds": ["setrankbackground", "setlevelupbackground", "setrolereward", "removerolereward", "rolerewards"]
+    }
+    embed = discord.Embed(
+        title="📖 Command Center",
+        description="Use the buttons below to run popular commands without typing `/`, or select a command to view usage.",
+        color=discord.Color.blurple()
+    )
+    for title, items in categories.items():
+        embed.add_field(name=title, value=", ".join(items), inline=False)
+    return embed
+
+def command_lookup(name):
+    for cmd in HELP_COMMANDS:
+        if cmd["name"] == name:
+            return cmd
+    return None
+ROAST_LINES = [
+    "If laughs were XP, you'd still be level 1.",
+    "You're the human version of a loading screen.",
+    "Somewhere out there, a tutorial is missing its beginner.",
+    "You bring everyone so much joy... when you leave.",
+    "If effort was currency, you'd be broke.",
+    "You're the reason the mute button was invented.",
+    "You're like a cloud — when you disappear, it's a beautiful day.",
+    "Your secrets are always safe with me. I never even listen.",
+    "You're proof that even NPCs can glitch.",
+    "If there were awards for awkward, you'd place second.",
+    "You're the main character... in a very short story.",
+    "Your Wi-Fi has more range than your personality.",
+    "You're the filler episode of this server.",
+    "You're like a broken pencil — pointless.",
+    "You have something on your chin... no, the third one down.",
+    "You're the reason keyboards have a backspace key.",
+    "You're a candle in the wind... unhelpful and flickery.",
+    "Your rank should be \"Apprentice Disappointment.\"",
+    "You're not stupid; you just have bad luck thinking.",
+    "You're the loudest whisper I've ever heard.",
+    "You're a DLC nobody asked for.",
+    "You make an excellent before photo.",
+    "You're the reason coffee needs caffeine.",
+    "You're about as useful as a screen door on a submarine.",
+    "If charisma were coins, you'd owe the bank.",
+    "You're the human equivalent of a typo.",
+    "You're not the sharpest sword in the inventory.",
+    "You're why the \"skip intro\" button exists.",
+    "You're a walking lag spike.",
+    "You're a bold move that didn't pay off.",
+    "You're the aftertaste of sparkling water.",
+    "You're the background noise of life.",
+    "You have the energy of a dial-up modem.",
+    "You're the tutorial boss of mediocrity.",
+    "You're like a phone at 1% — never useful when needed.",
+    "You're the reason we need patch notes.",
+    "You're a full-time side quest.",
+    "You sparkle... like a broken TV.",
+    "You're the first draft of a bad idea.",
+    "Your vibe is \"insert coin to continue.\"",
+    "You're a speed bump in human form.",
+    "You're as bright as a burnt-out lightbulb.",
+    "Your confidence is louder than your talent.",
+    "You have the depth of a puddle on a hot day.",
+    "You're the human form of \"buffering.\"",
+    "You're a walking \"404: personality not found.\"",
+    "You're the cardboard cutout of cool.",
+    "You're a broken compass — always wrong and still confident.",
+    "You're the type to misspell your own name.",
+    "You're a checklist with nothing checked.",
+    "You're a meme without the funny.",
+    "You're the reason the \"undo\" button exists.",
+    "You're the sequel nobody wanted.",
+    "You're a day-one bug with no hotfix.",
+    "You're the slow clap of disappointment.",
+    "You're the backup plan's backup plan.",
+    "You're a salad without the dressing.",
+    "You're a GPS that says \"recalculating\" forever.",
+    "You're a sunrise in grayscale.",
+    "You're a default ringtone in a world of playlists.",
+    "You're an off-brand superhero.",
+    "You're a puzzle with missing pieces.",
+    "You're a shortcut to nowhere.",
+    "You're the Wi-Fi signal in a basement.",
+    "You're a vending machine that keeps your coins.",
+    "You're a crowd with no cheers.",
+    "You're a mic drop with no mic.",
+    "You're a warm soda on a hot day.",
+    "You're a loading bar stuck at 99%.",
+    "You're a group chat on mute.",
+    "You're the reason autocorrect gives up.",
+    "You're a sock with no pair.",
+    "You're a spoiler in a bad movie.",
+    "You're a \"maybe\" in a world of \"yes.\"",
+    "You're a punchline without the setup.",
+    "You're the dull side of a butter knife.",
+    "You're a pop-up ad with no close button.",
+    "You're a playlist with no bangers.",
+    "You're a flashlight with dying batteries.",
+    "You're a failed captcha.",
+    "You're a sneeze that never comes.",
+    "You're a plot twist no one noticed.",
+    "You're a trophy with no competition.",
+    "You're a selfie without the filter.",
+    "You're a book with missing pages.",
+    "You're a remix that ruined the original.",
+    "You're a bridge to nowhere.",
+    "You're a \"k\" in a sea of messages.",
+    "You're a keyboard missing the spacebar.",
+    "You're a knock-knock joke with no door.",
+    "You're a pizza with no toppings.",
+    "You're a calendar with no weekends.",
+    "You're a donut with no hole.",
+    "You're an elevator stuck between floors.",
+    "You're a battery with no charge.",
+    "You're a prologue with no story.",
+    "You're a trailer that spoiled everything.",
+    "You're a whisper in a thunderstorm.",
+    "You're a firework that won't spark.",
+    "You're a chair with one leg.",
+    "You're a jigsaw missing the corner piece.",
+    "You're a comet that never arrives.",
+    "You're a stopwatch with no time.",
+    "You're a checkbox with no label.",
+    "You're a riddle with no answer.",
+    "You're the \"skip\" button that doesn't work.",
+    "You're a cup of decaf in a rush.",
+    "You're a storm with no rain.",
+    "You're a movie with no plot.",
+    "You're a lantern with no light.",
+    "You're a banter with no bite.",
+    "You're a trophy for participation.",
+    "You're an alarm that never rings.",
+    "You're a lullaby in a mosh pit.",
+    "You're a snowman in summer.",
+    "You're a bookmark in an empty book.",
+    "You're a dial without a number.",
+    "You're a candle with no wick.",
+    "You're a puzzle made of mashed potatoes.",
+    "You're a stopwatch in a slow-motion scene.",
+    "You're a paintbrush without paint.",
+    "You're a compass that points to \"meh.\"",
+    "You're an echo in a void.",
+    "You're a snack that's all crumbs.",
+    "You're a DJ with no drops.",
+    "You're a montage without music.",
+    "You're a high five with no hand.",
+    "You're a fireworks show in broad daylight.",
+    "You're a snowball in a volcano.",
+    "You're a riddle with a typo.",
+    "You're a mirror with no reflection.",
+    "You're a joke that needs subtitles.",
+    "You're a sunset behind clouds.",
+    "You're a ladder to nowhere.",
+    "You're a map with no legend.",
+    "You're a compass pointing to \"nope.\"",
+    "You're a ping with no pong.",
+    "You're a battery that only shows 1%.",
+    "You're a recipe with missing ingredients.",
+    "You're a book with only the index.",
+    "You're a record with no music.",
+    "You're a helmet without a bike.",
+    "You're a tent without poles.",
+    "You're a race with no finish line.",
+    "You're a sandwich with no filling.",
+    "You're a ticket to nowhere.",
+    "You're a parade with no floats.",
+    "You're a lighthouse with no light.",
+    "You're a comedy without timing.",
+    "You're a dance with no rhythm.",
+    "You're a treasure map that leads to socks.",
+    "You're a camera with no lens.",
+    "You're a puzzle with extra pieces.",
+    "You're a marathon with no training.",
+    "You're a nap in a hurricane.",
+    "You're a rocket with no fuel.",
+    "You're a scoreboard with no points.",
+    "You're a cheer with no crowd.",
+    "You're a highlight reel of bloopers.",
+    "You're a script with no dialogue.",
+    "You're a painter who uses invisible ink.",
+    "You're a flashlight in the sun.",
+    "You're a raincoat in the desert.",
+    "You're a handshake with no fingers.",
+    "You're a GPS in airplane mode.",
+    "You're a toaster with no bread.",
+    "You're a pillow with no fluff.",
+    "You're a smile with no teeth.",
+    "You're a marathon in flip-flops.",
+    "You're a drumline with no beat.",
+    "You're a zip file with no data.",
+    "You're a server with no uptime.",
+    "You're a mod with no permissions.",
+    "You're a headphone with one side.",
+    "You're a code block with syntax errors.",
+    "You're a quest with no reward.",
+    "You're a raid boss with no loot.",
+    "You're a potion with no effects.",
+    "You're a level-up with no stats.",
+    "You're a skill tree with no skills.",
+    "You're a crit with no damage.",
+    "You're a mount with no speed.",
+    "You're a guild with no members.",
+    "You're a leaderboard with no names.",
+    "You're a lobby with no players.",
+    "You're a respawn with no checkpoint.",
+    "You're a glitch with no fix.",
+    "You're a loot box with no loot.",
+    "You're a perk with no perks.",
+    "You're a daily quest with no reward.",
+    "You're a dungeon with no exits.",
+    "You're a quest marker on the wrong map.",
+    "You're a leaderboard with negative points.",
+    "You're a rarity that's just common.",
+    "You're an epic fail with rare vibes.",
+    "You're a boss fight with no boss.",
+    "You're a team chat with no team.",
+    "You're a ping with 999ms.",
+    "You're a battle pass with no tiers.",
+    "You're a sprint with no finish.",
+    "You're a patch that added bugs.",
+    "You're a debug log in a love letter.",
+    "You're a settings menu with no options.",
+    "You're a raid with no strategy.",
+    "You're a max level with min effort.",
+    "You're a loot drop of disappointment.",
+    "You're an upgrade that downgraded.",
+    "You're a buff that feels like a nerf.",
+    "You're a nerf disguised as a buff.",
+    "You're a healer who needs healing.",
+    "You're a tank with no armor.",
+    "You're a DPS with no damage.",
+    "You're a support with no support.",
+    "You're a sniper with no scope.",
+    "You're a runner with no stamina.",
+    "You're a mage with no mana.",
+    "You're a rogue with no stealth.",
+    "You're a bard with no song.",
+    "You're a warrior with no sword.",
+    "You're a wizard with no spells.",
+    "You're a potion that's just water.",
+    "You're a scroll with no text.",
+    "You're a shield made of paper.",
+    "You're a sword made of rubber.",
+    "You're a bow with no string.",
+    "You're a spell with no effect.",
+    "You're a trap that doesn't trigger.",
+    "You're a treasure chest with no treasure.",
+    "You're a key with no lock.",
+    "You're a lock with no key.",
+    "You're a map that lies.",
+    "You're a quest giver with no quest.",
+    "You're a quest with no XP.",
+    "You're a campfire with no warmth.",
+    "You're a tavern with no ale.",
+    "You're a dragon with no fire.",
+    "You're a phoenix that never rises.",
+    "You're a storm with no thunder.",
+    "You're a legend nobody heard.",
+    "You're a hero with no story.",
+    "You're a villain with no plan.",
+    "You're a sidekick with no hero.",
+    "You're a cliffhanger that falls flat.",
+    "You're a reboot that nobody watched.",
+    "You're a sequel with no original.",
+    "You're a crossover no one asked for.",
+    "You're a twist that's just tangled.",
+    "You're a finale with no climax.",
+    "You're a teaser with no release.",
+    "You're a leak with no content.",
+    "You're a spoiler for a boring plot.",
+    "You're a recap with no new info.",
+    "You're a binge with no fun.",
+    "You're a marathon of commercials.",
+    "You're a highlight reel of lowlights.",
+    "You're a \"soon\" that never arrives.",
+    "You're a feature stuck in beta.",
+    "You're a keyboard warrior with no Wi-Fi.",
+    "You're a meme from last year.",
+    "You're a screenshot with no context.",
+    "You're a chat bubble with no text.",
+    "You're a status set to \"busy.\"",
+    "You're a notification with no content.",
+    "You're a pin without a board.",
+    "You're a thread with no replies.",
+    "You're a sticker with no stick.",
+    "You're an emoji that nobody uses.",
+    "You're a reaction with no message.",
+    "You're a modmail with no mod.",
+    "You're a server with no boosts.",
+    "You're a ping that's always @everyone.",
+    "You're a loudspeaker with no message.",
+    "You're a voice channel with no voice.",
+    "You're a DM that never gets opened.",
+    "You're a report with no evidence.",
+    "You're a cooldown with no ability.",
+    "You're a queue with no game.",
+    "You're a lobby with no match.",
+    "You're a lost packet.",
+    "You're a dropped frame.",
+    "You're a ping spike.",
+    "You're a laggy day in a fast world.",
+    "You're a buffer wheel in human form.",
+    "You're a loading screen tip nobody reads.",
+    "You're a side note in your own story.",
+    "You're a \"last seen\" in real life.",
+    "You're a ghost message.",
+    "You're a reply that says \"lol\" only.",
+    "You're a joke with no punch.",
+    "You're a pun without the fun.",
+    "You're a summary of nothing.",
+    "You're a blank page.",
+    "You're a highlight that dims.",
+    "You're a spark that fizzles.",
+    "You're a flicker in a blackout.",
+    "You're a vibe check that failed.",
+    "You're a hero who skipped the tutorial.",
+    "You're a legend in your own group chat.",
+    "You're a meme in the worst way.",
+    "You're a plot hole with legs.",
+    "You're a cliff note to a short story.",
+    "You're a chapter that got deleted.",
+    "You're a tune that never lands.",
+    "You're a chorus with no hook.",
+    "You're a beat with no drop.",
+    "You're a rapper with no bars.",
+    "You're a singer with no chorus.",
+    "You're a mixtape of static.",
+    "You're a playlist full of ads.",
+    "You're a radio that only plays dead air.",
+    "You're a ringtone on silent.",
+    "You're a speaker with no volume.",
+    "You're a silent alarm.",
+    "You're a group project with no effort.",
+    "You're the Wi-Fi password nobody remembers.",
+    "You're a password reset email.",
+    "You're a captcha that fails.",
+    "You're a two-factor code that expired.",
+    "You're a download stuck at 0%.",
+    "You're a pop quiz with no answer key.",
+    "You're a sticky note that fell off.",
+    "You're a meeting that should've been an email.",
+    "You're a reply-all in a disaster.",
+    "You're a voicemail nobody checks.",
+    "You're an agenda with no agenda.",
+    "You're a calendar invite to nowhere.",
+    "You're a \"reply later\" that never comes.",
+    "You're a draft with no send.",
+    "You're a screen protector with bubbles.",
+    "You're a screenshot of a black screen.",
+    "You're a selfie with the lens cap on.",
+    "You're a timer that never starts.",
+    "You're a bell that never rings.",
+    "You're a doorbell with no door.",
+    "You're a hallway with no doors.",
+    "You're a keychain with no keys.",
+    "You're a treasure with no map.",
+    "You're a quiz with no questions.",
+    "You're a playlist skip in human form.",
+    "You're a charging cable that only works at one angle.",
+    "You're the \"are you still watching?\" pop-up.",
+    "You're a rainy day with no puddles.",
+    "You're a rainbow in black and white.",
+    "You're the human version of \"maybe later.\"",
+    "You're a notification for low storage.",
+    "You're a software update at 2 AM.",
+    "You're a reboot without the fix.",
+    "You're a recycle bin full of mistakes.",
+    "You're a broken link.",
+    "You're a QR code that leads nowhere.",
+    "You're the last slice no one wants.",
+    "You're a party with no music.",
+    "You're a cake with no frosting.",
+    "You're a candle that got snuffed.",
+    "You're a flashlight that's always dim.",
+    "You're the \"free trial\" that ends early.",
+    "You're the fine print nobody reads.",
+    "You're a warning label with no hazard.",
+    "You're a map that says \"You are lost.\"",
+    "You're a signpost pointing to \"shrug.\"",
+    "You're a GPS that says \"good luck.\"",
+    "You're a trail with no end.",
+    "You're a crossword with no clues.",
+    "You're a puzzle without a picture.",
+    "You're a board game with missing pieces.",
+    "You're a dice roll that always hits 1.",
+    "You're a deck of cards missing aces.",
+    "You're a trophy for last place.",
+    "You're a selfie stick with no phone.",
+    "You're a live stream with no viewers.",
+    "You're a video with no audio.",
+    "You're a podcast that never starts.",
+    "You're a mixtape with only the intro.",
+    "You're a finale that never airs.",
+    "You're a sequel to a forgotten movie.",
+    "You're an update that fixed nothing."
 ]
 
 # ================== READY ==================
@@ -282,6 +735,71 @@ async def auto_update_tracked_list():
             await msg.edit(embed=tracked_roles_list_embed(guild, role_ids))
         except:
             pass
+
+class HelpSelect(discord.ui.Select):
+    def __init__(self, options):
+        super().__init__(
+            placeholder="Select a command for details...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        cmd = command_lookup(self.values[0])
+        if not cmd:
+            await interaction.response.send_message("Command not found.", ephemeral=True)
+            return
+        embed = discord.Embed(
+            title=f"/{cmd['name']}",
+            description=cmd["desc"],
+            color=discord.Color.green()
+        )
+        embed.add_field(name="Usage", value=cmd["usage"], inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+class HelpView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=180)
+        options = [discord.SelectOption(label=c["name"], value=c["name"], description=c["desc"][:100]) for c in HELP_COMMANDS]
+        first = options[:25]
+        second = options[25:]
+        if first:
+            self.add_item(HelpSelect(first))
+        if second:
+            self.add_item(HelpSelect(second))
+
+    @discord.ui.button(label="Daily", style=discord.ButtonStyle.primary, emoji="🎁")
+    async def daily_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await daily(interaction)
+
+    @discord.ui.button(label="Coinflip", style=discord.ButtonStyle.secondary, emoji="🪙")
+    async def coinflip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await coinflip(interaction)
+
+    @discord.ui.button(label="Meme", style=discord.ButtonStyle.secondary, emoji="😂")
+    async def meme_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await meme(interaction)
+
+    @discord.ui.button(label="Question", style=discord.ButtonStyle.secondary, emoji="❓")
+    async def question_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await question(interaction)
+
+    @discord.ui.button(label="Would You Rather", style=discord.ButtonStyle.secondary, emoji="🤔")
+    async def wyr_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await wouldyourather(interaction)
+
+    @discord.ui.button(label="Topic", style=discord.ButtonStyle.secondary, emoji="💬")
+    async def topic_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await topic(interaction)
+
+    @discord.ui.button(label="Balance", style=discord.ButtonStyle.secondary, emoji="💰")
+    async def balance_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await balance(interaction)
+
+    @discord.ui.button(label="Work", style=discord.ButtonStyle.secondary, emoji="🛠️")
+    async def work_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await work(interaction)
 
 # ======================================================
 # ================== LEVEL SYSTEM ======================
@@ -951,6 +1469,31 @@ async def koniheist(interaction: discord.Interaction):
         user["last_heist"] = now
         save_json(ECONOMY_FILE, economy)
         await interaction.followup.send("🚔 Wrong answer! You got caught by the police! -300 coins.")
+
+@tree.command(name="roast", description="Roast someone creatively")
+async def roast(interaction: discord.Interaction, member: discord.Member):
+    if member.bot:
+        await interaction.response.send_message("🤖 Roasting bots is too easy.", ephemeral=True)
+        return
+    if member.id == interaction.user.id:
+        await interaction.response.send_message("😅 Self-roast? Bold move.", ephemeral=True)
+        return
+    roast_line = random.choice(ROAST_LINES)
+    embed = discord.Embed(
+        description=f"{member.mention} {roast_line}",
+        color=discord.Color.orange()
+    )
+    embed.set_image(url=LAUGH_IMAGE_URL)
+    await interaction.response.send_message(embed=embed)
+
+@tree.command(name="help", description="Show the command center")
+async def help_command(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=help_embed(), view=HelpView(), ephemeral=True)
+
+@bot.command(name="help")
+async def help_prefix(ctx: commands.Context):
+    await ctx.send(embed=help_embed(), view=HelpView())
+
 
 # ================== RUN ==================
 bot.run(os.getenv("DISCORD_TOKEN"))
