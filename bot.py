@@ -1493,8 +1493,5 @@ async def help_command(interaction: discord.Interaction):
 @bot.command(name="help")
 async def help_prefix(ctx: commands.Context):
     await ctx.send(embed=help_embed(), view=HelpView())
-
-
 # ================== RUN ==================
 bot.run(os.getenv("DISCORD_TOKEN"))
-
