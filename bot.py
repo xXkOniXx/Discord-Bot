@@ -35,8 +35,8 @@ def save_json(path, data):
 # ================== DEFAULT SETTINGS ==================
 def default_settings():
     return {
-        "xp_range": [10, 20],
-        "cooldown": 60,
+        "xp_range": [30, 60],
+        "cooldown": 5,
         "ignored_channels": [],
         "role_rewards": {},
         "levelup_bg": None,
@@ -45,8 +45,8 @@ def default_settings():
         "level_channel": None,
         "level_notify": {},
         "max_level": 100,
-        "voice_bonus_xp": 10,
-        "voice_bonus_cooldown": 300
+        "voice_bonus_xp": 60,
+        "voice_bonus_cooldown": 100,
     }
 
 def xp_needed(level):
@@ -863,7 +863,7 @@ async def on_message(message):
     gained_xp = int(gained_xp * gset.get("xp_multiplier", 1.0))
     user["xp"] += gained_xp
 
-    if user["xp"] >= xp_needed(user["level"]):
+        while user["xp"] >= xp_needed(user["level"]):
         user["xp"] -= xp_needed(user["level"])
         user["level"] += 1
 
@@ -882,6 +882,7 @@ async def on_message(message):
                 f"🎉 {message.author.mention} reached Level {user['level']}!",
                 file=discord.File(img, "levelup.png")
             )
+
 
     save_json(LEVEL_FILE, levels)
     save_json(SETTINGS_FILE, settings)
