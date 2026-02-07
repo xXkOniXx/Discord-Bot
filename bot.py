@@ -863,7 +863,7 @@ async def on_message(message):
     gained_xp = int(gained_xp * gset.get("xp_multiplier", 1.0))
     user["xp"] += gained_xp
 
-        while user["xp"] >= xp_needed(user["level"]):
+    while user["xp"] >= xp_needed(user["level"]):
         user["xp"] -= xp_needed(user["level"])
         user["level"] += 1
 
@@ -882,7 +882,6 @@ async def on_message(message):
                 f"🎉 {message.author.mention} reached Level {user['level']}!",
                 file=discord.File(img, "levelup.png")
             )
-
 
     save_json(LEVEL_FILE, levels)
     save_json(SETTINGS_FILE, settings)
@@ -903,6 +902,7 @@ async def on_message(message):
                 afk_mentions.append(f"{mentioned.display_name} is AFK: {reason}")
         if afk_mentions:
             await message.channel.send("\n".join(afk_mentions))
+
     await bot.process_commands(message)
 
 @bot.event
