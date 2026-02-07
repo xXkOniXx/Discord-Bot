@@ -905,6 +905,7 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
+
 @bot.event
 async def on_voice_state_update(member, before, after):
     if member.bot or not member.guild:
