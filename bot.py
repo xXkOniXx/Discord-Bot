@@ -862,7 +862,6 @@ async def on_message(message):
     gained_xp = random.randint(*gset["xp_range"])
     gained_xp = int(gained_xp * gset.get("xp_multiplier", 1.0))
     user["xp"] += gained_xp
-
     while user["xp"] >= xp_needed(user["level"]):
         user["xp"] -= xp_needed(user["level"])
         user["level"] += 1
