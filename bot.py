@@ -862,6 +862,7 @@ async def on_message(message):
     gained_xp = random.randint(*gset["xp_range"])
     gained_xp = int(gained_xp * gset.get("xp_multiplier", 1.0))
     user["xp"] += gained_xp
+
     while user["xp"] >= xp_needed(user["level"]):
         user["xp"] -= xp_needed(user["level"])
         user["level"] += 1
@@ -903,7 +904,6 @@ async def on_message(message):
             await message.channel.send("\n".join(afk_mentions))
 
     await bot.process_commands(message)
-
 
 @bot.event
 async def on_voice_state_update(member, before, after):
