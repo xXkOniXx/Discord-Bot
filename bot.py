@@ -863,8 +863,13 @@ async def on_message(message):
     gained_xp = int(gained_xp * gset.get("xp_multiplier", 1.0))
     user["xp"] += gained_xp
 
-    while user["xp"] >= xp_needed(user["level"]):
-        user["xp"] -= xp_needed(user["level"])
+    # 🔥 Fixed leveling loop
+    while True:
+        needed = xp_needed(user["level"])
+        if user["xp"] < needed:
+            break
+
+        user["xp"] -= needed
         user["level"] += 1
 
         reward = gset["role_rewards"].get(str(user["level"]))
@@ -883,6 +888,7 @@ async def on_message(message):
                 file=discord.File(img, "levelup.png")
             )
 
+    # Save AFTER processing levels
     save_json(LEVEL_FILE, levels)
     save_json(SETTINGS_FILE, settings)
     save_json(ECONOMY_FILE, economy)
@@ -904,6 +910,7 @@ async def on_message(message):
             await message.channel.send("\n".join(afk_mentions))
 
     await bot.process_commands(message)
+
 
 @bot.event
 async def on_voice_state_update(member, before, after):
