@@ -4,6 +4,7 @@ from discord import app_commands
 import json, os, random, io, time
 from typing import Optional
 from PIL import Image, ImageDraw, ImageFont
+import asyncio
 
 GUILD_ID = 1386046923693101076
 
@@ -132,12 +133,67 @@ DEBATE_TOPICS = [
 ]
 
 HEIST_TRIVIA = [
-    {"q": "What planet is known as the Red Planet?", "a": "mars"},
-    {"q": "How many continents are there on Earth?", "a": "7"},
-    {"q": "What is the capital of France?", "a": "paris"},
-    {"q": "Which ocean is the largest?", "a": "pacific"},
-    {"q": "What is 5 + 7?", "a": "12"}
+    {"q": "What planet is known as the Red Planet?", "a": ["mars"]},
+    {"q": "How many continents are there on Earth?", "a": ["7", "seven"]},
+    {"q": "What is the capital of France?", "a": ["paris"]},
+    {"q": "Which ocean is the largest?", "a": ["pacific", "pacific ocean"]},
+    {"q": "What is 5 + 7?", "a": ["12", "twelve"]},
+
+    {"q": "What gas do plants absorb from the atmosphere?", "a": ["carbon dioxide", "co2"]},
+    {"q": "How many sides does a hexagon have?", "a": ["6", "six"]},
+    {"q": "What is the largest mammal in the world?", "a": ["blue whale", "whale"]},
+    {"q": "What do bees make?", "a": ["honey"]},
+    {"q": "What is the boiling point of water in Celsius?", "a": ["100", "100c", "100 degrees"]},
+
+    {"q": "Which planet is closest to the sun?", "a": ["mercury"]},
+    {"q": "How many days are in a leap year?", "a": ["366"]},
+    {"q": "What is the hardest natural substance on Earth?", "a": ["diamond"]},
+    {"q": "What is the main language spoken in Brazil?", "a": ["portuguese"]},
+    {"q": "What is the square root of 64?", "a": ["8", "eight"]},
+
+    {"q": "Which animal is known as the King of the Jungle?", "a": ["lion"]},
+    {"q": "How many letters are in the English alphabet?", "a": ["26", "twenty six"]},
+    {"q": "What is the capital of Japan?", "a": ["tokyo"]},
+    {"q": "Which planet has rings?", "a": ["saturn"]},
+    {"q": "What is 9 x 9?", "a": ["81", "eighty one"]},
+
+    {"q": "What is the fastest land animal?", "a": ["cheetah"]},
+    {"q": "What color do you get when you mix red and white?", "a": ["pink"]},
+    {"q": "How many hours are in a day?", "a": ["24", "twenty four"]},
+    {"q": "What is the largest continent?", "a": ["asia"]},
+    {"q": "Which instrument has keys, pedals, and strings?", "a": ["piano"]},
+
+    {"q": "What is the freezing point of water in Celsius?", "a": ["0", "zero"]},
+    {"q": "What is the tallest animal in the world?", "a": ["giraffe"]},
+    {"q": "Which planet is known for its big red spot?", "a": ["jupiter"]},
+    {"q": "How many weeks are in a year?", "a": ["52", "fifty two"]},
+    {"q": "What is 15 divided by 3?", "a": ["5", "five"]},
+
+    {"q": "What is the capital of the United States?", "a": ["washington dc", "washington d.c.", "dc"]},
+    {"q": "How many minutes are in an hour?", "a": ["60", "sixty"]},
+    {"q": "What shape has three sides?", "a": ["triangle"]},
+    {"q": "What is H2O commonly known as?", "a": ["water"]},
+    {"q": "What is the largest planet in our solar system?", "a": ["jupiter"]},
+
+    {"q": "What do you call a baby cat?", "a": ["kitten"]},
+    {"q": "What is 10 squared?", "a": ["100", "one hundred"]},
+    {"q": "Which continent is Egypt in?", "a": ["africa"]},
+    {"q": "What is the opposite of hot?", "a": ["cold"]},
+    {"q": "How many months are in a year?", "a": ["12", "twelve"]},
+
+    {"q": "What is the capital of Canada?", "a": ["ottawa"]},
+    {"q": "Which animal can fly and is a mammal?", "a": ["bat", "bats"]},
+    {"q": "What is the currency used in Japan?", "a": ["yen"]},
+    {"q": "How many legs does a spider have?", "a": ["8", "eight"]},
+    {"q": "What is the tallest mountain in the world?", "a": ["mount everest", "everest"]},
+
+    {"q": "What is 3 x 4?", "a": ["12", "twelve"]},
+    {"q": "What galaxy do we live in?", "a": ["milky way", "the milky way"]},
+    {"q": "What is the main star of our solar system?", "a": ["sun", "the sun"]},
+    {"q": "How many bones are in the adult human body?", "a": ["206"]},
+    {"q": "What is the capital of Italy?", "a": ["rome"]}
 ]
+
 
 LAUGH_IMAGE_URL = "https://media.giphy.com/media/10JhviFuU2gWD6/giphy.gif"
 
@@ -1459,35 +1515,79 @@ async def koniheist(interaction: discord.Interaction):
     economy_guild, economy = get_economy_data(interaction.guild.id)
     user = ensure_user_economy(economy_guild, interaction.user.id)
     now = time.time()
-    if now - user.get("last_heist", 0) < 1200:
-        await interaction.response.send_message("⏳ The heist is on cooldown. Try again later!", ephemeral=True)
+
+    if now - user.get("last_heist", 0) < 1200:  # 20 min cooldown
+        await interaction.response.send_message(
+            "⏳ The heist is on cooldown. Try again later!", ephemeral=True
+        )
         return
 
     trivia = random.choice(HEIST_TRIVIA)
-    await interaction.response.send_message(f"🚨 Koni Heist! Answer in 10s: **{trivia['q']}**")
+
+    # Send initial message
+    await interaction.response.send_message(
+        f"🚨 **Koni Heist!** Answer in 10 seconds!\n\n❓ **{trivia['q']}**\n⏳ Time left: **10s**"
+    )
+
+    heist_message = await interaction.original_response()
 
     def check(msg):
         return msg.author.id == interaction.user.id and msg.channel.id == interaction.channel.id
 
+    # Countdown task with dramatic "sound effects"
+    async def countdown():
+        sounds = [
+            "🚨 **ALARM TRIGGERED** 🚨",
+            "🔴 Security system online...",
+            "⏳ TICK...",
+            "⏳ TICK...",
+            "⏳ TICK...",
+            "⚠️ Guards are getting closer...",
+            "⏳ TICK...",
+            "⏳ TICK...",
+            "🚓 Sirens in the distance...",
+            "💥 **TIME IS UP!**"
+        ]
+
+        for i in range(10):
+            await asyncio.sleep(1)
+            try:
+                await heist_message.edit(
+                    content=(
+                        f"🚨 **Koni Heist in Progress!**\n\n"
+                        f"❓ **{trivia['q']}**\n"
+                        f"⏳ Time left: **{10 - i}s**\n\n"
+                        f"{sounds[i]}"
+                    )
+                )
+            except:
+                break
+
+    countdown_task = asyncio.create_task(countdown())
+
     try:
         msg = await bot.wait_for("message", timeout=10.0, check=check)
-    except:
+        countdown_task.cancel()
+    except asyncio.TimeoutError:
         user["coins"] -= 300
         user["last_heist"] = now
         save_json(ECONOMY_FILE, economy)
-        await interaction.followup.send("🚔 You got caught by the police! -300 coins.")
+        await interaction.followup.send("🚔 Time's up! You got caught by the police! -300 coins")
         return
 
-    if msg.content.strip().lower() == trivia["a"]:
+    user_answer = msg.content.strip().lower()
+    valid_answers = [a.lower() for a in trivia["a"]]
+
+    if user_answer in valid_answers:
         user["coins"] += 900
-        user["last_heist"] = now
-        save_json(ECONOMY_FILE, economy)
-        await interaction.followup.send("💰 Heist success! +900 coins.")
+        result = "💰 **VAULT CRACKED!** You escaped with the money! +900 coins 🎉"
     else:
         user["coins"] -= 300
-        user["last_heist"] = now
-        save_json(ECONOMY_FILE, economy)
-        await interaction.followup.send("🚔 Wrong answer! You got caught by the police! -300 coins.")
+        result = "🚔 **WEE-OOO WEE-OOO!** You got caught by the police! -300 coins"
+
+    user["last_heist"] = now
+    save_json(ECONOMY_FILE, economy)
+    await interaction.followup.send(result)
 
 @tree.command(name="roast", description="Roast someone creatively")
 async def roast(interaction: discord.Interaction, member: discord.Member):
