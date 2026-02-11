@@ -4,3 +4,4 @@ pytz
 aiohttp
 motor
 pymongo
+dnspython
