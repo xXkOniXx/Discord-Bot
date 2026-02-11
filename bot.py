@@ -43,7 +43,9 @@ else:
             MONGO_URI,
             tls=True,
             tlsCAFile=certifi.where(),
-            serverSelectionTimeoutMS=10000,
+            serverSelectionTimeoutMS=1500,
+            connectTimeoutMS=1500,
+            socketTimeoutMS=1500,
         )
         db = mongo_client["discord_bot"]
         store_collection = db["stores"]
@@ -94,6 +96,7 @@ def _migrate_store_if_needed(name: str):
 
 
 def load_store(name: str, default=None):
+    global mongo_ready
     base_default = default if default is not None else {}
     if name in store_fallback_cache:
         return store_fallback_cache[name]
@@ -111,11 +114,13 @@ def load_store(name: str, default=None):
         return doc.get("data", base_default)
     except PyMongoError as mongo_error:
         print(f"⚠️ Mongo load failed for {name}, using in-memory fallback: {mongo_error}")
+        mongo_ready = False
         store_fallback_cache[name] = base_default
         return store_fallback_cache[name]
 
 
 def save_store(name: str, data):
+    global mongo_ready
     store_fallback_cache[name] = data
     if not mongo_ready or store_collection is None:
         return
@@ -131,6 +136,7 @@ def save_json(path, data):
         )
     except PyMongoError as mongo_error:
         print(f"⚠️ Mongo save failed for {name}, data kept in-memory: {mongo_error}")
+        mongo_ready = False
 
 # ================== DEFAULT SETTINGS ==================
 def default_settings():
