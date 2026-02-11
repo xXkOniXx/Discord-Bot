@@ -25,39 +25,34 @@ tree = bot.tree
 TRACKED_FILE = "tracked_roles.json"
 LEVEL_FILE = "leveling_data.json"
 SETTINGS_FILE = "leveling_settings.json"
-
-# ================== UTILS ==================
-MONGO_URI = os.getenv("MONGO_URI")
-mongo = AsyncIOMotorClient(MONGO_URI)
-db = mongo["koni_bot"]
-
-levels_collection = db["levels"]
-economy_collection = db["economy"]
-settings_collection = db["settings"]
-tracked_roles_collection = db["tracked_roles"]
-
 # ================== DATABASE ==================
 MONGO_URI = os.getenv("MONGO_URI")
-if not MONGO_URI:
-    raise RuntimeError("MONGO_URI is required")
 
-mongo_client = MongoClient(
-    MONGO_URI,
-    tls=True,
-    tlsCAFile=certifi.where(),
-    serverSelectionTimeoutMS=10000,
-)
-db = mongo_client["discord_bot"]
-store_collection = db["stores"]
-
-mongo_ready = True
+# ================== JSON UTILS ==================
+def load_json(path, default=None):
+mongo_client = None
+store_collection = None
+mongo_ready = False
 store_fallback_cache = {}
 
-try:
-    mongo_client.admin.command("ping")
-except PyMongoError as mongo_error:
-    mongo_ready = False
-    print(f"⚠️ MongoDB unavailable on startup, using in-memory fallback: {mongo_error}")
+if not MONGO_URI:
+    print("⚠️ MONGO_URI is not set. Running with in-memory fallback storage only.")
+else:
+    try:
+        mongo_client = MongoClient(
+            MONGO_URI,
+            tls=True,
+            tlsCAFile=certifi.where(),
+            serverSelectionTimeoutMS=10000,
+        )
+        db = mongo_client["discord_bot"]
+        store_collection = db["stores"]
+        mongo_client.admin.command("ping")
+        mongo_ready = True
+    except PyMongoError as mongo_error:
+        print(f"⚠️ MongoDB unavailable on startup, using in-memory fallback: {mongo_error}")
+    except Exception as mongo_error:
+        print(f"⚠️ Unexpected Mongo setup error, using in-memory fallback: {mongo_error}")
 
 TRACKED_STORE = "tracked_roles"
 LEVEL_STORE = "leveling_data"
@@ -86,6 +81,8 @@ def _read_legacy_json(path: str):
 
 
 def _migrate_store_if_needed(name: str):
+    if not mongo_ready or store_collection is None:
+        return
     if store_collection.find_one({"_id": name}) is not None:
         return
     for file_path in LEGACY_STORE_FILES.get(name, []):
@@ -96,15 +93,12 @@ def _migrate_store_if_needed(name: str):
             return
 
 
-def save_json(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=4)
 def load_store(name: str, default=None):
     base_default = default if default is not None else {}
     if name in store_fallback_cache:
         return store_fallback_cache[name]
 
-    if not mongo_ready:
+    if not mongo_ready or store_collection is None:
         store_fallback_cache[name] = base_default
         return store_fallback_cache[name]
 
@@ -123,9 +117,12 @@ def load_store(name: str, default=None):
 
 def save_store(name: str, data):
     store_fallback_cache[name] = data
-    if not mongo_ready:
+    if not mongo_ready or store_collection is None:
         return
 
+def save_json(path, data):
+    with open(path, "w") as f:
+        json.dump(data, f, indent=4)
     try:
         store_collection.update_one(
             {"_id": name},
@@ -152,7 +149,7 @@ def default_settings():
         "level_notify": {},
         "max_level": 100,
         "voice_bonus_xp": 60,
-        "voice_bonus_cooldown": 100
+        "voice_bonus_cooldown": 100,
     }
 
 def xp_needed(level):
@@ -1809,3 +1806,4 @@ async def help_prefix(ctx: commands.Context):
     await ctx.send(embed=help_embed(), view=HelpView())
 # ================== RUN ==================
 bot.run(os.getenv("DISCORD_TOKEN"))
+
