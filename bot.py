@@ -1,12 +1,27 @@
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-import json, os, random, io, time
+import json
+import os
+import random
+import io
+import time
+import asyncio
 from typing import Optional
 from PIL import Image, ImageDraw, ImageFont
-import asyncio
+from pymongo import MongoClient
 
 GUILD_ID = 1386046923693101076
+
+# --------- MongoDB اتصال ---------
+mongo_uri = os.getenv("MONGO_URI")
+client = MongoClient(mongo_uri)
+
+db = client["koni_bot"]
+
+economy_collection = db["economy"]
+levels_collection = db["levels"]
+settings_collection = db["settings"]
 
 # ================== INTENTS ==================
 intents = discord.Intents.default()
@@ -86,8 +101,25 @@ def get_economy_data(guild_id):
     economy = load_json(ECONOMY_FILE, {})
     return economy.setdefault(str(guild_id), {}), economy
 
-def ensure_user_economy(economy_guild, user_id):
-    return economy_guild.setdefault(str(user_id), default_economy_user())
+def ensure_user_economy(guild_id, user_id):
+    user = economy_collection.find_one({
+        "guild_id": str(guild_id),
+        "user_id": str(user_id)
+    })
+
+    if not user:
+        user = {
+            "guild_id": str(guild_id),
+            "user_id": str(user_id),
+            "coins": 0,
+            "afk": False,
+            "afk_reason": None,
+            "last_heist": 0
+        }
+        economy_collection.insert_one(user)
+
+    return user
+
 
 SHOP_BACKGROUNDS = {
     "Galaxy": 500,
