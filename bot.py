@@ -1,34 +1,23 @@
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-import json
-import os
-import random
-import io
-import time
+import json, os, random, io, time
 import asyncio
+import os, random, io, time, json
+import certifi
+from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 from typing import Optional
 from PIL import Image, ImageDraw, ImageFont
-from pymongo import MongoClient
 
 GUILD_ID = 1386046923693101076
-
-# --------- MongoDB اتصال ---------
-from motor.motor_asyncio import AsyncIOMotorClient
-
-mongo = AsyncIOMotorClient(os.getenv("MONGO_URI"))
-db = mongo["koni_bot"]
-
-levels_collection = db["levels"]
-economy_collection = db["economy"]
-settings_collection = db["settings"]
-tracked_roles_collection = db["tracked_roles"]
 
 # ================== INTENTS ==================
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 
+bot = commands.Bot(command_prefix="!", intents=intents)
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 tree = bot.tree
 
@@ -36,34 +25,126 @@ tree = bot.tree
 TRACKED_FILE = "tracked_roles.json"
 LEVEL_FILE = "leveling_data.json"
 SETTINGS_FILE = "leveling_settings.json"
-ECONOMY_FILE = "economy_data.json"
 
 # ================== JSON UTILS ==================
 def load_json(path, default=None):
+# ================== DATABASE ==================
+MONGO_URI = os.getenv("MONGO_URI")
+if not MONGO_URI:
+    raise RuntimeError("MONGO_URI is required")
+
+mongo_client = MongoClient(
+    MONGO_URI,
+    tls=True,
+    tlsCAFile=certifi.where(),
+    serverSelectionTimeoutMS=10000,
+)
+db = mongo_client["discord_bot"]
+store_collection = db["stores"]
+
+mongo_ready = True
+store_fallback_cache = {}
+
+try:
+    mongo_client.admin.command("ping")
+except PyMongoError as mongo_error:
+    mongo_ready = False
+    print(f"⚠️ MongoDB unavailable on startup, using in-memory fallback: {mongo_error}")
+
+TRACKED_STORE = "tracked_roles"
+LEVEL_STORE = "leveling_data"
+SETTINGS_STORE = "leveling_settings"
+ECONOMY_STORE = "economy_data"
+
+LEGACY_STORE_FILES = {
+    TRACKED_STORE: ["tracked_roles.json", "tracked_roles.json.txt"],
+    LEVEL_STORE: ["leveling_data.json", "leveling_data.json.txt"],
+    SETTINGS_STORE: ["leveling_settings.json", "leveling_settings.json.txt"],
+    ECONOMY_STORE: ["economy_data.json", "economy_data.json.txt"],
+}
+
+
+def _read_legacy_json(path: str):
     if not os.path.exists(path):
         return default if default is not None else {}
     with open(path, "r") as f:
         return json.load(f)
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as legacy_file:
+            return json.load(legacy_file)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _migrate_store_if_needed(name: str):
+    if store_collection.find_one({"_id": name}) is not None:
+        return
+    for file_path in LEGACY_STORE_FILES.get(name, []):
+        legacy_data = _read_legacy_json(file_path)
+        if legacy_data is not None:
+            store_collection.insert_one({"_id": name, "data": legacy_data})
+            print(f"📦 Migrated legacy JSON into MongoDB store: {name} ({file_path})")
+            return
+
 
 def save_json(path, data):
     with open(path, "w") as f:
         json.dump(data, f, indent=4)
+def load_store(name: str, default=None):
+    base_default = default if default is not None else {}
+    if name in store_fallback_cache:
+        return store_fallback_cache[name]
+
+    if not mongo_ready:
+        store_fallback_cache[name] = base_default
+        return store_fallback_cache[name]
+
+    try:
+        _migrate_store_if_needed(name)
+        doc = store_collection.find_one({"_id": name})
+        if doc is None:
+            store_collection.insert_one({"_id": name, "data": base_default})
+            return base_default
+        return doc.get("data", base_default)
+    except PyMongoError as mongo_error:
+        print(f"⚠️ Mongo load failed for {name}, using in-memory fallback: {mongo_error}")
+        store_fallback_cache[name] = base_default
+        return store_fallback_cache[name]
+
+
+def save_store(name: str, data):
+    store_fallback_cache[name] = data
+    if not mongo_ready:
+        return
+
+    try:
+        store_collection.update_one(
+            {"_id": name},
+            {"$set": {"data": data}},
+            upsert=True,
+        )
+    except PyMongoError as mongo_error:
+        print(f"⚠️ Mongo save failed for {name}, data kept in-memory: {mongo_error}")
 
 # ================== DEFAULT SETTINGS ==================
 def default_settings():
     return {
+        "xp_range": [10, 20],
+        "cooldown": 60,
         "xp_range": [30, 60],
         "cooldown": 5,
         "ignored_channels": [],
         "role_rewards": {},
         "levelup_bg": None,
+        "rank_backgrounds": {}
         "rank_backgrounds": {},
         "xp_multiplier": 1.0,
         "level_channel": None,
         "level_notify": {},
         "max_level": 100,
         "voice_bonus_xp": 60,
-        "voice_bonus_cooldown": 100,
+        "voice_bonus_cooldown": 100
     }
 
 def xp_needed(level):
@@ -91,35 +172,42 @@ def default_economy_user():
     }
 
 def get_guild_settings(guild_id):
-    settings = load_json(SETTINGS_FILE, {})
+    settings = load_store(SETTINGS_STORE, {})
     return settings.setdefault(str(guild_id), default_settings()), settings
 
 def get_level_data(guild_id):
-    levels = load_json(LEVEL_FILE, {})
+    levels = load_store(LEVEL_STORE, {})
     return levels.setdefault(str(guild_id), {}), levels
 
 def get_economy_data(guild_id):
-    economy = load_json(ECONOMY_FILE, {})
+    economy = load_store(ECONOMY_STORE, {})
     return economy.setdefault(str(guild_id), {}), economy
 
-def ensure_user_economy(guild_id, user_id):
-    user = economy_collection.find_one({
-        "guild_id": str(guild_id),
-        "user_id": str(user_id)
-    })
+def ensure_user_economy(economy_guild, user_id):
+    return economy_guild.setdefault(str(user_id), default_economy_user())
 
-    if not user:
-        user = {
-            "guild_id": str(guild_id),
-            "user_id": str(user_id),
-            "coins": 0,
-            "afk": False,
-            "afk_reason": None,
-            "last_heist": 0
-        }
-        economy_collection.insert_one(user)
 
-    return user
+def update_user_coins(guild_id, user_id, delta):
+    economy_guild, economy = get_economy_data(guild_id)
+    user = ensure_user_economy(economy_guild, user_id)
+    user["coins"] = user.get("coins", 0) + delta
+    save_store(ECONOMY_STORE, economy)
+    return user["coins"]
+
+
+def set_user_coins(guild_id, user_id, amount):
+    economy_guild, economy = get_economy_data(guild_id)
+    user = ensure_user_economy(economy_guild, user_id)
+    user["coins"] = max(0, int(amount))
+    save_store(ECONOMY_STORE, economy)
+    return user["coins"]
+
+
+def get_user_coins(guild_id, user_id):
+    economy_guild, economy = get_economy_data(guild_id)
+    user = ensure_user_economy(economy_guild, user_id)
+    save_store(ECONOMY_STORE, economy)
+    return user.get("coins", 0)
 
 
 SHOP_BACKGROUNDS = {
@@ -166,67 +254,57 @@ DEBATE_TOPICS = [
 ]
 
 HEIST_TRIVIA = [
-    {"q": "What planet is known as the Red Planet?", "a": ["mars"]},
-    {"q": "How many continents are there on Earth?", "a": ["7", "seven"]},
-    {"q": "What is the capital of France?", "a": ["paris"]},
-    {"q": "Which ocean is the largest?", "a": ["pacific", "pacific ocean"]},
-    {"q": "What is 5 + 7?", "a": ["12", "twelve"]},
-
-    {"q": "What gas do plants absorb from the atmosphere?", "a": ["carbon dioxide", "co2"]},
-    {"q": "How many sides does a hexagon have?", "a": ["6", "six"]},
-    {"q": "What is the largest mammal in the world?", "a": ["blue whale", "whale"]},
-    {"q": "What do bees make?", "a": ["honey"]},
-    {"q": "What is the boiling point of water in Celsius?", "a": ["100", "100c", "100 degrees"]},
-
-    {"q": "Which planet is closest to the sun?", "a": ["mercury"]},
-    {"q": "How many days are in a leap year?", "a": ["366"]},
-    {"q": "What is the hardest natural substance on Earth?", "a": ["diamond"]},
-    {"q": "What is the main language spoken in Brazil?", "a": ["portuguese"]},
-    {"q": "What is the square root of 64?", "a": ["8", "eight"]},
-
-    {"q": "Which animal is known as the King of the Jungle?", "a": ["lion"]},
-    {"q": "How many letters are in the English alphabet?", "a": ["26", "twenty six"]},
-    {"q": "What is the capital of Japan?", "a": ["tokyo"]},
-    {"q": "Which planet has rings?", "a": ["saturn"]},
-    {"q": "What is 9 x 9?", "a": ["81", "eighty one"]},
-
-    {"q": "What is the fastest land animal?", "a": ["cheetah"]},
-    {"q": "What color do you get when you mix red and white?", "a": ["pink"]},
-    {"q": "How many hours are in a day?", "a": ["24", "twenty four"]},
-    {"q": "What is the largest continent?", "a": ["asia"]},
-    {"q": "Which instrument has keys, pedals, and strings?", "a": ["piano"]},
-
-    {"q": "What is the freezing point of water in Celsius?", "a": ["0", "zero"]},
-    {"q": "What is the tallest animal in the world?", "a": ["giraffe"]},
-    {"q": "Which planet is known for its big red spot?", "a": ["jupiter"]},
-    {"q": "How many weeks are in a year?", "a": ["52", "fifty two"]},
-    {"q": "What is 15 divided by 3?", "a": ["5", "five"]},
-
-    {"q": "What is the capital of the United States?", "a": ["washington dc", "washington d.c.", "dc"]},
-    {"q": "How many minutes are in an hour?", "a": ["60", "sixty"]},
-    {"q": "What shape has three sides?", "a": ["triangle"]},
-    {"q": "What is H2O commonly known as?", "a": ["water"]},
-    {"q": "What is the largest planet in our solar system?", "a": ["jupiter"]},
-
-    {"q": "What do you call a baby cat?", "a": ["kitten"]},
-    {"q": "What is 10 squared?", "a": ["100", "one hundred"]},
-    {"q": "Which continent is Egypt in?", "a": ["africa"]},
-    {"q": "What is the opposite of hot?", "a": ["cold"]},
-    {"q": "How many months are in a year?", "a": ["12", "twelve"]},
-
-    {"q": "What is the capital of Canada?", "a": ["ottawa"]},
-    {"q": "Which animal can fly and is a mammal?", "a": ["bat", "bats"]},
-    {"q": "What is the currency used in Japan?", "a": ["yen"]},
-    {"q": "How many legs does a spider have?", "a": ["8", "eight"]},
-    {"q": "What is the tallest mountain in the world?", "a": ["mount everest", "everest"]},
-
-    {"q": "What is 3 x 4?", "a": ["12", "twelve"]},
-    {"q": "What galaxy do we live in?", "a": ["milky way", "the milky way"]},
-    {"q": "What is the main star of our solar system?", "a": ["sun", "the sun"]},
-    {"q": "How many bones are in the adult human body?", "a": ["206"]},
-    {"q": "What is the capital of Italy?", "a": ["rome"]}
+    {"q": "What planet is known as the Red Planet?", "answers": ["mars", "planet mars"]},
+    {"q": "How many continents are there on Earth?", "answers": ["7", "seven"]},
+    {"q": "What is the capital of France?", "answers": ["paris"]},
+    {"q": "Which ocean is the largest?", "answers": ["pacific", "pacific ocean"]},
+    {"q": "What is 5 + 7?", "answers": ["12", "twelve"]},
+    {"q": "What gas do plants absorb from the atmosphere?", "answers": ["carbon dioxide", "co2"]},
+    {"q": "How many sides does a hexagon have?", "answers": ["6", "six"]},
+    {"q": "What is the largest mammal in the world?", "answers": ["blue whale", "whale"]},
+    {"q": "What do bees make?", "answers": ["honey"]},
+    {"q": "What is the boiling point of water in Celsius?", "answers": ["100", "100c", "100 degrees"]},
+    {"q": "Which planet is closest to the sun?", "answers": ["mercury"]},
+    {"q": "How many days are in a leap year?", "answers": ["366"]},
+    {"q": "What is the hardest natural substance on Earth?", "answers": ["diamond"]},
+    {"q": "What is the main language spoken in Brazil?", "answers": ["portuguese"]},
+    {"q": "What is the square root of 64?", "answers": ["8", "eight"]},
+    {"q": "Which animal is known as the King of the Jungle?", "answers": ["lion"]},
+    {"q": "How many letters are in the English alphabet?", "answers": ["26", "twenty six"]},
+    {"q": "What is the capital of Japan?", "answers": ["tokyo"]},
+    {"q": "Which planet has rings?", "answers": ["saturn"]},
+    {"q": "What is 9 x 9?", "answers": ["81", "eighty one"]},
+    {"q": "What is the fastest land animal?", "answers": ["cheetah"]},
+    {"q": "What color do you get when you mix red and white?", "answers": ["pink"]},
+    {"q": "How many hours are in a day?", "answers": ["24", "twenty four"]},
+    {"q": "What is the largest continent?", "answers": ["asia"]},
+    {"q": "Which instrument has keys, pedals, and strings?", "answers": ["piano"]},
+    {"q": "What is the freezing point of water in Celsius?", "answers": ["0", "zero"]},
+    {"q": "What is the tallest animal in the world?", "answers": ["giraffe"]},
+    {"q": "Which planet is known for its big red spot?", "answers": ["jupiter"]},
+    {"q": "How many weeks are in a year?", "answers": ["52", "fifty two"]},
+    {"q": "What is 15 divided by 3?", "answers": ["5", "five"]},
+    {"q": "What is the capital of the United States?", "answers": ["washington dc", "washington d.c.", "dc"]},
+    {"q": "How many minutes are in an hour?", "answers": ["60", "sixty"]},
+    {"q": "What shape has three sides?", "answers": ["triangle"]},
+    {"q": "What is H2O commonly known as?", "answers": ["water"]},
+    {"q": "What is the largest planet in our solar system?", "answers": ["jupiter"]},
+    {"q": "What do you call a baby cat?", "answers": ["kitten"]},
+    {"q": "What is 10 squared?", "answers": ["100", "one hundred"]},
+    {"q": "Which continent is Egypt in?", "answers": ["africa"]},
+    {"q": "What is the opposite of hot?", "answers": ["cold"]},
+    {"q": "How many months are in a year?", "answers": ["12", "twelve"]},
+    {"q": "What is the capital of Canada?", "answers": ["ottawa"]},
+    {"q": "Which animal can fly and is a mammal?", "answers": ["bat", "bats"]},
+    {"q": "What is the currency used in Japan?", "answers": ["yen"]},
+    {"q": "How many legs does a spider have?", "answers": ["8", "eight"]},
+    {"q": "What is the tallest mountain in the world?", "answers": ["mount everest", "everest"]},
+    {"q": "What is 3 x 4?", "answers": ["12", "twelve"]},
+    {"q": "What galaxy do we live in?", "answers": ["milky way", "the milky way"]},
+    {"q": "What is the main star of our solar system?", "answers": ["sun", "the sun"]},
+    {"q": "How many bones are in the adult human body?", "answers": ["206"]},
+    {"q": "What is the capital of Italy?", "answers": ["rome"]},
 ]
-
 
 LAUGH_IMAGE_URL = "https://media.giphy.com/media/10JhviFuU2gWD6/giphy.gif"
 
@@ -247,7 +325,10 @@ HELP_COMMANDS = [
     {"name": "setxpmultiplier", "usage": "/setxpmultiplier <num>", "desc": "Set XP multiplier."},
     {"name": "blacklistxp", "usage": "/blacklistxp #channel", "desc": "Block XP in channel."},
     {"name": "resetuserxp", "usage": "/resetuserxp @user", "desc": "Reset user XP."},
+    {"name": "setlevel", "usage": "/setlevel @user <level> [xp]", "desc": "Admin: set user level/xp."},
     {"name": "balance", "usage": "/balance [@user]", "desc": "Check coin balance."},
+    {"name": "givecoins", "usage": "/givecoins @user <amount>", "desc": "Admin: give coins to a user."},
+    {"name": "setbalance", "usage": "/setbalance @user <amount>", "desc": "Admin: set a user coin balance."},
     {"name": "work", "usage": "/work", "desc": "Earn coins hourly."},
     {"name": "shop", "usage": "/shop", "desc": "View shop items."},
     {"name": "buybackground", "usage": "/buybackground <name>", "desc": "Buy a background."},
@@ -282,8 +363,8 @@ def help_embed():
         "🎮 Fun / Social": ["daily", "rep", "coinflip", "8ball", "meme", "roast"],
         "🏆 Leveling": ["rank", "leaderboard", "prestige", "levelroles", "levelnotify", "backgrounds"],
         "💬 Chat Boosters": ["question", "wouldyourather", "topic"],
-        "🛠️ Admin": ["setlevelchannel", "setxpmultiplier", "blacklistxp", "resetuserxp", "setxp", "setcooldown"],
-        "💰 Economy": ["balance", "work", "shop", "buybackground", "gamblerist", "koniheist", "divorce"],
+        "🛠️ Admin": ["setlevelchannel", "setxpmultiplier", "blacklistxp", "resetuserxp", "setlevel", "setxp", "setcooldown"],
+        "💰 Economy": ["balance", "givecoins", "setbalance", "work", "shop", "buybackground", "gamblerist", "koniheist", "divorce"],
         "🎨 Cosmetics": ["setcolor", "setbadge", "profile", "voicebonus", "afk", "marry"],
         "📌 Role Tracking": ["trackrole", "untrackrole", "trackrolelist", "trackroleall", "untrackroleall"],
         "🖼️ Backgrounds": ["setrankbackground", "setlevelupbackground", "setrolereward", "removerolereward", "rolerewards"]
@@ -311,8 +392,6 @@ async def send_response(interaction, content=None, embed=None, ephemeral=False, 
         await interaction.followup.send(**payload)
     else:
         await interaction.response.send_message(**payload)
-
-
 ROAST_LINES = [
     "If laughs were XP, you'd still be level 1.",
     "You're the human version of a loading screen.",
@@ -704,8 +783,29 @@ async def on_ready():
         print(f"❌ Sync error: {e}")
 
     auto_update.start()
-    auto_update_tracked_list.start()
+    if not auto_update.is_running():
+        auto_update.start()
+    if not auto_update_tracked_list.is_running():
+        auto_update_tracked_list.start()
     print(f"🤖 Logged in as {bot.user}")
+
+
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.errors.MissingPermissions):
+        await send_response(interaction, "❌ You do not have permission to use this command.", ephemeral=True)
+        return
+
+    if isinstance(error, app_commands.errors.CommandOnCooldown):
+        await send_response(interaction, f"⏳ Command is on cooldown. Try again in {error.retry_after:.1f}s.", ephemeral=True)
+        return
+
+    if isinstance(error, app_commands.errors.TransformerError):
+        await send_response(interaction, "❌ Invalid option or argument. Please check command inputs.", ephemeral=True)
+        return
+
+    print(f"❌ App command error: {error}")
+    await send_response(interaction, "❌ Something went wrong while running that command.", ephemeral=True)
 
 
 # ======================================================
@@ -742,6 +842,7 @@ def tracked_roles_list_embed(guild, role_ids):
 @app_commands.checks.has_permissions(administrator=True)
 async def trackrole(interaction: discord.Interaction, role: discord.Role):
     data = load_json(TRACKED_FILE)
+    data = load_store(TRACKED_STORE, {})
     gid = str(interaction.guild.id)
     data.setdefault(gid, {})
 
@@ -749,16 +850,17 @@ async def trackrole(interaction: discord.Interaction, role: discord.Role):
     data[gid][str(role.id)] = {"channel": interaction.channel.id, "message": msg.id}
 
     save_json(TRACKED_FILE, data)
+    save_store(TRACKED_STORE, data)
     await interaction.response.send_message("✅ Role tracked", ephemeral=True)
 
 @tree.command(name="untrackrole")
 @app_commands.checks.has_permissions(administrator=True)
 async def untrackrole(interaction: discord.Interaction, role: discord.Role):
-    data = load_json(TRACKED_FILE)
+    data = load_store(TRACKED_STORE, {})
     gid = str(interaction.guild.id)
     if str(role.id) in data.get(gid, {}):
         del data[gid][str(role.id)]
-        save_json(TRACKED_FILE, data)
+        save_store(TRACKED_STORE, data)
         await interaction.response.send_message("✅ Role untracked.", ephemeral=True)
     else:
         await interaction.response.send_message("❌ That role isn't tracked.", ephemeral=True)
@@ -766,20 +868,20 @@ async def untrackrole(interaction: discord.Interaction, role: discord.Role):
 @tree.command(name="trackrolelist")
 @app_commands.checks.has_permissions(administrator=True)
 async def trackrolelist(interaction: discord.Interaction):
-    data = load_json(TRACKED_FILE)
+    data = load_store(TRACKED_STORE, {})
     gid = str(interaction.guild.id)
     role_ids = tracked_role_ids(data, gid)
     embed = tracked_roles_list_embed(interaction.guild, role_ids)
 
     msg = await interaction.channel.send(embed=embed)
     data.setdefault(gid, {})["_list"] = {"channel": interaction.channel.id, "message": msg.id}
-    save_json(TRACKED_FILE, data)
+    save_store(TRACKED_STORE, data)
     await interaction.response.send_message("✅ Tracking list posted and will update every 5 minutes.", ephemeral=True)
 
 @tree.command(name="trackroleall")
 @app_commands.checks.has_permissions(administrator=True)
 async def trackroleall(interaction: discord.Interaction):
-    data = load_json(TRACKED_FILE)
+    data = load_store(TRACKED_STORE, {})
     gid = str(interaction.guild.id)
     data.setdefault(gid, {})
     for role in interaction.guild.roles:
@@ -787,24 +889,25 @@ async def trackroleall(interaction: discord.Interaction):
             continue
         msg = await interaction.channel.send(embed=role_embed(role))
         data[gid][str(role.id)] = {"channel": interaction.channel.id, "message": msg.id}
-    save_json(TRACKED_FILE, data)
+    save_store(TRACKED_STORE, data)
     await interaction.response.send_message("✅ All roles are now tracked.", ephemeral=True)
 
 @tree.command(name="untrackroleall")
 @app_commands.checks.has_permissions(administrator=True)
 async def untrackroleall(interaction: discord.Interaction):
-    data = load_json(TRACKED_FILE)
+    data = load_store(TRACKED_STORE, {})
     gid = str(interaction.guild.id)
     list_info = data.get(gid, {}).get("_list")
     data[gid] = {}
     if list_info:
         data[gid]["_list"] = list_info
-    save_json(TRACKED_FILE, data)
+    save_store(TRACKED_STORE, data)
     await interaction.response.send_message("✅ All roles untracked.", ephemeral=True)
 
 @tasks.loop(minutes=10)
 async def auto_update():
     data = load_json(TRACKED_FILE)
+    data = load_store(TRACKED_STORE, {})
     for guild in bot.guilds:
         gid = str(guild.id)
         for rid, info in data.get(gid, {}).items():
@@ -822,7 +925,7 @@ async def auto_update():
 
 @tasks.loop(minutes=5)
 async def auto_update_tracked_list():
-    data = load_json(TRACKED_FILE)
+    data = load_store(TRACKED_STORE, {})
     for guild in bot.guilds:
         gid = str(guild.id)
         list_info = data.get(gid, {}).get("_list")
@@ -930,35 +1033,9 @@ async def create_levelup_image(member, level, bg_path):
     out.seek(0)
     return out
 
-@bot.event
-async def on_message(message):
-    if message.author.bot or not message.guild:
-        return
-
-    gset, settings = get_guild_settings(message.guild.id)
-    glevels, levels = get_level_data(message.guild.id)
-    economy_guild, economy = get_economy_data(message.guild.id)
-    econ_user = ensure_user_economy(economy_guild, message.author.id)
-    user = glevels.setdefault(str(message.author.id), {"xp": 0, "level": 1, "last": 0})
-
-    if str(message.channel.id) in gset["ignored_channels"]:
-        return
-
-    if time.time() - user["last"] < gset["cooldown"]:
-        return
-
-    user["last"] = time.time()
-    gained_xp = random.randint(*gset["xp_range"])
-    gained_xp = int(gained_xp * gset.get("xp_multiplier", 1.0))
-    user["xp"] += gained_xp
-
-    # 🔥 Fixed leveling loop
-    while True:
-        needed = xp_needed(user["level"])
-        if user["xp"] < needed:
-            break
-
-        user["xp"] -= needed
+async def apply_level_ups(message: discord.Message, user: dict, gset: dict):
+    while user["xp"] >= xp_needed(user["level"]):
+        user["xp"] -= xp_needed(user["level"])
         user["level"] += 1
 
         reward = gset["role_rewards"].get(str(user["level"]))
@@ -977,15 +1054,44 @@ async def on_message(message):
                 file=discord.File(img, "levelup.png")
             )
 
-    # Save AFTER processing levels
-    save_json(LEVEL_FILE, levels)
-    save_json(SETTINGS_FILE, settings)
-    save_json(ECONOMY_FILE, economy)
+@bot.event
+async def on_message(message):
+    if message.author.bot or not message.guild:
+        return
+
+    settings = load_json(SETTINGS_FILE, {})
+    levels = load_json(LEVEL_FILE, {})
+
+    gset = settings.setdefault(str(message.guild.id), default_settings())
+    glevels = levels.setdefault(str(message.guild.id), {})
+    gset, settings = get_guild_settings(message.guild.id)
+    glevels, levels = get_level_data(message.guild.id)
+    economy_guild, economy = get_economy_data(message.guild.id)
+    econ_user = ensure_user_economy(economy_guild, message.author.id)
+    user = glevels.setdefault(str(message.author.id), {"xp": 0, "level": 1, "last": 0})
+
+    if str(message.channel.id) in gset["ignored_channels"]:
+        return
+
+    if time.time() - user["last"] < gset["cooldown"]:
+        return
+
+    user["last"] = time.time()
+    user["xp"] += random.randint(*gset["xp_range"])
+    gained_xp = random.randint(*gset["xp_range"])
+    gained_xp = int(gained_xp * gset.get("xp_multiplier", 1.0))
+    user["xp"] += gained_xp
+
+    await apply_level_ups(message, user, gset)
+
+    save_store(LEVEL_STORE, levels)
+    save_store(SETTINGS_STORE, settings)
+    save_store(ECONOMY_STORE, economy)
 
     if econ_user.get("afk"):
         econ_user["afk"] = False
         econ_user["afk_reason"] = None
-        save_json(ECONOMY_FILE, economy)
+        save_store(ECONOMY_STORE, economy)
         await message.channel.send(f"👋 Welcome back, {message.author.mention}! Your AFK is now off.")
 
     if message.mentions:
@@ -997,15 +1103,21 @@ async def on_message(message):
                 afk_mentions.append(f"{mentioned.display_name} is AFK: {reason}")
         if afk_mentions:
             await message.channel.send("\n".join(afk_mentions))
-
     await bot.process_commands(message)
 
-
+    if user["xp"] >= xp_needed(user["level"]):
+        user["xp"] -= xp_needed(user["level"])
+        user["level"] += 1
 @bot.event
 async def on_voice_state_update(member, before, after):
     if member.bot or not member.guild:
         return
 
+        reward = gset["role_rewards"].get(str(user["level"]))
+        if reward:
+            role = message.guild.get_role(int(reward))
+            if role:
+                await message.author.add_roles(role)
     if before.channel is None and after.channel is not None:
         gset, settings = get_guild_settings(member.guild.id)
         economy_guild, economy = get_economy_data(member.guild.id)
@@ -1013,20 +1125,28 @@ async def on_voice_state_update(member, before, after):
         if not econ_user.get("voice_bonus", True):
             return
 
+        img = await create_levelup_image(message.author, user["level"], gset.get("levelup_bg"))
         now = time.time()
         if now - econ_user.get("last_voice_bonus", 0) < gset.get("voice_bonus_cooldown", 300):
             return
 
+        await message.channel.send(
+            f"🎉 {message.author.mention} reached Level {user['level']}!",
+            file=discord.File(img, "levelup.png")
+        )
         glevels, levels = get_level_data(member.guild.id)
         user = glevels.setdefault(str(member.id), {"xp": 0, "level": 1, "last": 0})
 
+    save_json(LEVEL_FILE, levels)
+    save_json(SETTINGS_FILE, settings)
+    await bot.process_commands(message)
         bonus_xp = gset.get("voice_bonus_xp", 10)
         bonus_xp = int(bonus_xp * gset.get("xp_multiplier", 1.0))
         user["xp"] += bonus_xp
         econ_user["last_voice_bonus"] = now
 
-        save_json(LEVEL_FILE, levels)
-        save_json(ECONOMY_FILE, economy)
+        save_store(LEVEL_STORE, levels)
+        save_store(ECONOMY_STORE, economy)
 
 # ======================================================
 # ================== RANK CARD =========================
@@ -1070,6 +1190,8 @@ async def rank(interaction: discord.Interaction, member: Optional[discord.Member
     member = member or interaction.user
     levels = load_json(LEVEL_FILE, {})
     settings = load_json(SETTINGS_FILE, {})
+    levels = load_store(LEVEL_STORE, {})
+    settings = load_store(SETTINGS_STORE, {})
     gid, uid = str(interaction.guild.id), str(member.id)
 
     user = levels.get(gid, {}).get(uid)
@@ -1089,6 +1211,7 @@ async def rank(interaction: discord.Interaction, member: Optional[discord.Member
 @tree.command(name="leaderboard")
 async def leaderboard(interaction: discord.Interaction):
     levels = load_json(LEVEL_FILE,{})
+    levels = load_store(LEVEL_STORE,{})
     gid = str(interaction.guild.id)
     top = sorted(levels.get(gid,{}).items(), key=lambda x:(x[1]["level"],x[1]["xp"]), reverse=True)[:10]
 
@@ -1104,29 +1227,35 @@ async def leaderboard(interaction: discord.Interaction):
 @app_commands.checks.has_permissions(administrator=True)
 async def setxp(interaction: discord.Interaction, min_xp:int, max_xp:int):
     settings = load_json(SETTINGS_FILE,{})
+    settings = load_store(SETTINGS_STORE,{})
     gid = str(interaction.guild.id)
     settings.setdefault(gid, default_settings())["xp_range"] = [min_xp,max_xp]
     save_json(SETTINGS_FILE, settings)
+    save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message("✅ XP updated", ephemeral=True)
 
 @tree.command(name="setcooldown")
 @app_commands.checks.has_permissions(administrator=True)
 async def setcooldown(interaction: discord.Interaction, seconds:int):
     settings = load_json(SETTINGS_FILE,{})
+    settings = load_store(SETTINGS_STORE,{})
     gid = str(interaction.guild.id)
     settings.setdefault(gid, default_settings())["cooldown"] = seconds
     save_json(SETTINGS_FILE, settings)
+    save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message("⏳ Cooldown updated", ephemeral=True)
 
 @tree.command(name="setrankbackground")
 async def setrankbackground(interaction: discord.Interaction, image: discord.Attachment):
     settings = load_json(SETTINGS_FILE,{})
+    settings = load_store(SETTINGS_STORE,{})
     gid, uid = str(interaction.guild.id), str(interaction.user.id)
     os.makedirs(f"rank_backgrounds/{gid}", exist_ok=True)
     path = f"rank_backgrounds/{gid}/{uid}.png"
     await image.save(path)
     settings.setdefault(gid, default_settings())["rank_backgrounds"][uid] = path
     save_json(SETTINGS_FILE, settings)
+    save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message("✅ Rank background set!", ephemeral=True)
 
 @tree.command(name="setlevelupbackground")
@@ -1137,6 +1266,7 @@ async def setlevelupbackground(interaction: discord.Interaction, image: discord.
         return
 
     settings = load_json(SETTINGS_FILE, {})
+    settings = load_store(SETTINGS_STORE, {})
     gid = str(interaction.guild.id)
 
     os.makedirs("levelup_backgrounds", exist_ok=True)
@@ -1145,27 +1275,32 @@ async def setlevelupbackground(interaction: discord.Interaction, image: discord.
 
     settings.setdefault(gid, default_settings())["levelup_bg"] = path
     save_json(SETTINGS_FILE, settings)
+    save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message("✅ Level-up background updated!", ephemeral=True)
 
 @tree.command(name="setrolereward")
 @app_commands.checks.has_permissions(administrator=True)
 async def setrolereward(interaction: discord.Interaction, level: int, role: discord.Role):
     settings = load_json(SETTINGS_FILE, {})
+    settings = load_store(SETTINGS_STORE, {})
     gid = str(interaction.guild.id)
     settings.setdefault(gid, default_settings())["role_rewards"][str(level)] = role.id
     save_json(SETTINGS_FILE, settings)
+    save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message(f"🎁 {role.mention} will be given at Level {level}", ephemeral=True)
 
 @tree.command(name="removerolereward")
 @app_commands.checks.has_permissions(administrator=True)
 async def removerolereward(interaction: discord.Interaction, level: int):
     settings = load_json(SETTINGS_FILE, {})
+    settings = load_store(SETTINGS_STORE, {})
     gid = str(interaction.guild.id)
     rewards = settings.setdefault(gid, default_settings())["role_rewards"]
 
     if str(level) in rewards:
         del rewards[str(level)]
         save_json(SETTINGS_FILE, settings)
+        save_store(SETTINGS_STORE, settings)
         await interaction.response.send_message("🗑️ Reward removed.", ephemeral=True)
     else:
         await interaction.response.send_message("❌ No reward set for that level.", ephemeral=True)
@@ -1173,6 +1308,7 @@ async def removerolereward(interaction: discord.Interaction, level: int):
 @tree.command(name="rolerewards")
 async def rolerewards(interaction: discord.Interaction):
     settings = load_json(SETTINGS_FILE, {})
+    settings = load_store(SETTINGS_STORE, {})
     gid = str(interaction.guild.id)
     rewards = settings.get(gid, {}).get("role_rewards", {})
 
@@ -1189,6 +1325,8 @@ async def rolerewards(interaction: discord.Interaction):
     embed = discord.Embed(title="🎖️ Level Role Rewards", description=desc, color=discord.Color.green())
     await interaction.response.send_message(embed=embed)
 
+# ================== RUN ==================
+bot.run(os.getenv("DISCORD_TOKEN"))
 # ======================================================
 # ================== NEW COMMANDS ======================
 # ======================================================
@@ -1220,8 +1358,8 @@ async def daily(interaction: discord.Interaction):
     user["xp"] += base_xp + bonus
     econ_user["last_daily"] = now
 
-    save_json(LEVEL_FILE, levels)
-    save_json(ECONOMY_FILE, economy)
+    save_store(LEVEL_STORE, levels)
+    save_store(ECONOMY_STORE, economy)
 
     await send_response(
         interaction,
@@ -1245,7 +1383,7 @@ async def rep(interaction: discord.Interaction, member: discord.Member):
 
     receiver["rep"] += 1
     giver["rep_last"] = now
-    save_json(ECONOMY_FILE, economy)
+    save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message(f"👍 {member.mention} received a rep point!")
 
 @tree.command(name="coinflip", description="50/50 gamble for XP")
@@ -1258,7 +1396,7 @@ async def coinflip(interaction: discord.Interaction):
         result = "🎉 You won! +25 XP"
     else:
         result = "😅 You lost! Better luck next time."
-    save_json(LEVEL_FILE, levels)
+    save_store(LEVEL_STORE, levels)
     await send_response(interaction, result)
 
 @tree.command(name="8ball", description="Ask the magic 8-ball")
@@ -1298,14 +1436,14 @@ async def prestige(interaction: discord.Interaction):
     user["level"] = 1
     user["xp"] = 0
 
-    save_json(LEVEL_FILE, levels)
-    save_json(ECONOMY_FILE, economy)
-    save_json(SETTINGS_FILE, settings)
+    save_store(LEVEL_STORE, levels)
+    save_store(ECONOMY_STORE, economy)
+    save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message(f"⭐ Prestige unlocked! You are now {badge}.")
 
 @tree.command(name="levelroles", description="Show level role rewards")
 async def levelroles(interaction: discord.Interaction):
-    settings = load_json(SETTINGS_FILE, {})
+    settings = load_store(SETTINGS_STORE, {})
     gid = str(interaction.guild.id)
     rewards = settings.get(gid, {}).get("role_rewards", {})
 
@@ -1327,7 +1465,7 @@ async def levelnotify(interaction: discord.Interaction):
     gset, settings = get_guild_settings(interaction.guild.id)
     notify = gset.setdefault("level_notify", {}).get(str(interaction.user.id), True)
     gset["level_notify"][str(interaction.user.id)] = not notify
-    save_json(SETTINGS_FILE, settings)
+    save_store(SETTINGS_STORE, settings)
     status = "ON" if gset["level_notify"][str(interaction.user.id)] else "OFF"
     await interaction.response.send_message(f"🔔 Level-up messages are now {status}.", ephemeral=True)
 
@@ -1359,7 +1497,7 @@ async def topic(interaction: discord.Interaction):
 async def setlevelchannel(interaction: discord.Interaction, channel: discord.TextChannel):
     gset, settings = get_guild_settings(interaction.guild.id)
     gset["level_channel"] = channel.id
-    save_json(SETTINGS_FILE, settings)
+    save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message(f"✅ Level-up channel set to {channel.mention}", ephemeral=True)
 
 @tree.command(name="setxpmultiplier", description="Set XP multiplier")
@@ -1367,7 +1505,7 @@ async def setlevelchannel(interaction: discord.Interaction, channel: discord.Tex
 async def setxpmultiplier(interaction: discord.Interaction, multiplier: float):
     gset, settings = get_guild_settings(interaction.guild.id)
     gset["xp_multiplier"] = max(0.1, min(multiplier, 5.0))
-    save_json(SETTINGS_FILE, settings)
+    save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message(f"✅ XP multiplier set to {gset['xp_multiplier']}x", ephemeral=True)
 
 @tree.command(name="blacklistxp", description="Block XP farming in a channel")
@@ -1376,7 +1514,7 @@ async def blacklistxp(interaction: discord.Interaction, channel: discord.TextCha
     gset, settings = get_guild_settings(interaction.guild.id)
     if str(channel.id) not in gset["ignored_channels"]:
         gset["ignored_channels"].append(str(channel.id))
-    save_json(SETTINGS_FILE, settings)
+    save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message(f"🚫 XP disabled in {channel.mention}", ephemeral=True)
 
 @tree.command(name="resetuserxp", description="Reset a user's XP and level")
@@ -1384,15 +1522,54 @@ async def blacklistxp(interaction: discord.Interaction, channel: discord.TextCha
 async def resetuserxp(interaction: discord.Interaction, member: discord.Member):
     glevels, levels = get_level_data(interaction.guild.id)
     glevels[str(member.id)] = {"xp": 0, "level": 1, "last": 0}
-    save_json(LEVEL_FILE, levels)
+    save_store(LEVEL_STORE, levels)
     await interaction.response.send_message(f"♻️ Reset XP for {member.mention}", ephemeral=True)
+
+
+@tree.command(name="setlevel", description="Admin: Set a user's level and optional XP")
+@app_commands.checks.has_permissions(administrator=True)
+async def setlevel(interaction: discord.Interaction, member: discord.Member, level: int, xp: int = 0):
+    glevels, levels = get_level_data(interaction.guild.id)
+    glevels[str(member.id)] = {
+        "xp": max(0, int(xp)),
+        "level": max(1, int(level)),
+        "last": glevels.get(str(member.id), {}).get("last", 0),
+    }
+    save_store(LEVEL_STORE, levels)
+    await interaction.response.send_message(
+        f"✅ Set {member.mention} to level {max(1, int(level))} with {max(0, int(xp))} XP.",
+        ephemeral=True,
+    )
+
 
 @tree.command(name="balance", description="Check your coin balance")
 async def balance(interaction: discord.Interaction, member: Optional[discord.Member] = None):
     member = member or interaction.user
-    economy_guild, _ = get_economy_data(interaction.guild.id)
-    econ_user = ensure_user_economy(economy_guild, member.id)
-    await send_response(interaction, f"💰 {member.display_name} has {econ_user['coins']} coins.")
+    coins = get_user_coins(interaction.guild.id, member.id)
+    await send_response(interaction, f"💰 {member.display_name} has {coins} coins.")
+
+@tree.command(name="givecoins", description="Admin: Give coins to a user")
+@app_commands.checks.has_permissions(administrator=True)
+async def givecoins(interaction: discord.Interaction, member: discord.Member, amount: int):
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be greater than 0.", ephemeral=True)
+        return
+    new_balance = update_user_coins(interaction.guild.id, member.id, amount)
+    await interaction.response.send_message(
+        f"✅ Gave {amount} coins to {member.mention}. New balance: {new_balance}",
+        ephemeral=True,
+    )
+
+
+@tree.command(name="setbalance", description="Admin: Set a user's coin balance")
+@app_commands.checks.has_permissions(administrator=True)
+async def setbalance(interaction: discord.Interaction, member: discord.Member, amount: int):
+    new_balance = set_user_coins(interaction.guild.id, member.id, amount)
+    await interaction.response.send_message(
+        f"✅ Set {member.mention}'s balance to {new_balance} coins.",
+        ephemeral=True,
+    )
+
 
 @tree.command(name="work", description="Earn coins every hour")
 async def work(interaction: discord.Interaction):
@@ -1405,7 +1582,7 @@ async def work(interaction: discord.Interaction):
     earned = random.randint(50, 150)
     econ_user["coins"] += earned
     econ_user["last_work"] = now
-    save_json(ECONOMY_FILE, economy)
+    save_store(ECONOMY_STORE, economy)
     await send_response(interaction, f"🛠️ You earned {earned} coins!")
 
 @tree.command(name="shop", description="View the shop")
@@ -1431,7 +1608,7 @@ async def buybackground(interaction: discord.Interaction, background: str):
         return
     econ_user["coins"] -= price
     econ_user["backgrounds"].append(background)
-    save_json(ECONOMY_FILE, economy)
+    save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message(f"🎉 You bought the **{background}** background!")
 
 @tree.command(name="setcolor", description="Set your rank card accent color (hex)")
@@ -1442,7 +1619,7 @@ async def setcolor(interaction: discord.Interaction, color_hex: str):
     economy_guild, economy = get_economy_data(interaction.guild.id)
     econ_user = ensure_user_economy(economy_guild, interaction.user.id)
     econ_user["color"] = color_hex
-    save_json(ECONOMY_FILE, economy)
+    save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message(f"🎨 Color updated to {color_hex}.", ephemeral=True)
 
 @tree.command(name="setbadge", description="Choose a badge to display")
@@ -1453,7 +1630,7 @@ async def setbadge(interaction: discord.Interaction, badge: str):
         await interaction.response.send_message("❌ You don't own that badge.", ephemeral=True)
         return
     econ_user["badge"] = badge
-    save_json(ECONOMY_FILE, economy)
+    save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message(f"🏅 Badge set to **{badge}**.", ephemeral=True)
 
 @tree.command(name="profile", description="View a user's profile")
@@ -1480,7 +1657,7 @@ async def voicebonus(interaction: discord.Interaction):
     economy_guild, economy = get_economy_data(interaction.guild.id)
     econ_user = ensure_user_economy(economy_guild, interaction.user.id)
     econ_user["voice_bonus"] = not econ_user.get("voice_bonus", True)
-    save_json(ECONOMY_FILE, economy)
+    save_store(ECONOMY_STORE, economy)
     status = "ON" if econ_user["voice_bonus"] else "OFF"
     await interaction.response.send_message(f"🎧 Voice bonus is now {status}.", ephemeral=True)
 
@@ -1490,7 +1667,7 @@ async def afk(interaction: discord.Interaction, reason: Optional[str] = None):
     econ_user = ensure_user_economy(economy_guild, interaction.user.id)
     econ_user["afk"] = True
     econ_user["afk_reason"] = reason
-    save_json(ECONOMY_FILE, economy)
+    save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message("😴 You're now AFK.", ephemeral=True)
 
 @tree.command(name="marry", description="Marry another user")
@@ -1506,7 +1683,7 @@ async def marry(interaction: discord.Interaction, member: discord.Member):
         return
     user["married_to"] = member.id
     partner["married_to"] = interaction.user.id
-    save_json(ECONOMY_FILE, economy)
+    save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message(f"💍 {interaction.user.mention} and {member.mention} are now married!")
 
 @tree.command(name="divorce", description="Divorce your partner (costs 500 coins)")
@@ -1524,7 +1701,7 @@ async def divorce(interaction: discord.Interaction):
     user["coins"] -= 500
     user["married_to"] = None
     partner["married_to"] = None
-    save_json(ECONOMY_FILE, economy)
+    save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message(
         "💔 How could you! you dirty bastard whyd you cheat?! thats it if i cant have you nobody can! *grabs shotgun*"
     )
@@ -1540,7 +1717,7 @@ async def gamblerist(interaction: discord.Interaction):
     else:
         user["coins"] -= 500
         result = "🎲 You lost! -500 coins"
-    save_json(ECONOMY_FILE, economy)
+    save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message(result)
 
 @tree.command(name="koniheist", description="Answer a trivia question for 900 coins (20 min cooldown)")
@@ -1548,79 +1725,56 @@ async def koniheist(interaction: discord.Interaction):
     economy_guild, economy = get_economy_data(interaction.guild.id)
     user = ensure_user_economy(economy_guild, interaction.user.id)
     now = time.time()
-
-    if now - user.get("last_heist", 0) < 1200:  # 20 min cooldown
-        await interaction.response.send_message(
-            "⏳ The heist is on cooldown. Try again later!", ephemeral=True
-        )
+    if now - user.get("last_heist", 0) < 1200:
+        await interaction.response.send_message("⏳ The heist is on cooldown. Try again later!", ephemeral=True)
         return
 
     trivia = random.choice(HEIST_TRIVIA)
+    answers = {answer.strip().lower() for answer in trivia.get("answers", [])}
+    await interaction.response.send_message(f"🚨 Koni Heist! Answer in 10s: **{trivia['q']}**\n⏱️ Time left: **10**")
+    prompt = await interaction.original_response()
 
-    # Send initial message
-    await interaction.response.send_message(
-        f"🚨 **Koni Heist!** Answer in 10 seconds!\n\n❓ **{trivia['q']}**\n⏳ Time left: **10s**"
-    )
+    countdown_stop = asyncio.Event()
 
-    heist_message = await interaction.original_response()
+    async def countdown_task():
+        for remaining in range(9, 0, -1):
+            if countdown_stop.is_set():
+                return
+            await asyncio.sleep(1)
+            if countdown_stop.is_set():
+                return
+            try:
+                await prompt.edit(content=f"🚨 Koni Heist! Answer in 10s: **{trivia['q']}**\n⏱️ Time left: **{remaining}**")
+            except discord.HTTPException:
+                return
+
+    countdown = asyncio.create_task(countdown_task())
 
     def check(msg):
         return msg.author.id == interaction.user.id and msg.channel.id == interaction.channel.id
 
-    # Countdown task with dramatic "sound effects"
-    async def countdown():
-        sounds = [
-            "🚨 **ALARM TRIGGERED** 🚨",
-            "🔴 Security system online...",
-            "⏳ TICK...",
-            "⏳ TICK...",
-            "⏳ TICK...",
-            "⚠️ Guards are getting closer...",
-            "⏳ TICK...",
-            "⏳ TICK...",
-            "🚓 Sirens in the distance...",
-            "💥 **TIME IS UP!**"
-        ]
-
-        for i in range(10):
-            await asyncio.sleep(1)
-            try:
-                await heist_message.edit(
-                    content=(
-                        f"🚨 **Koni Heist in Progress!**\n\n"
-                        f"❓ **{trivia['q']}**\n"
-                        f"⏳ Time left: **{10 - i}s**\n\n"
-                        f"{sounds[i]}"
-                    )
-                )
-            except:
-                break
-
-    countdown_task = asyncio.create_task(countdown())
-
     try:
         msg = await bot.wait_for("message", timeout=10.0, check=check)
-        countdown_task.cancel()
+        countdown_stop.set()
+        await countdown
     except asyncio.TimeoutError:
-        user["coins"] -= 300
+        countdown_stop.set()
+        await countdown
+        update_user_coins(interaction.guild.id, interaction.user.id, -300)
         user["last_heist"] = now
-        save_json(ECONOMY_FILE, economy)
-        await interaction.followup.send("🚔 Time's up! You got caught by the police! -300 coins")
+        save_store(ECONOMY_STORE, economy)
+        await interaction.followup.send("🚔 You got caught by the police! -300 coins.")
         return
 
-    user_answer = msg.content.strip().lower()
-    valid_answers = [a.lower() for a in trivia["a"]]
-
-    if user_answer in valid_answers:
-        user["coins"] += 900
-        result = "💰 **VAULT CRACKED!** You escaped with the money! +900 coins 🎉"
-    else:
-        user["coins"] -= 300
-        result = "🚔 **WEE-OOO WEE-OOO!** You got caught by the police! -300 coins"
-
     user["last_heist"] = now
-    save_json(ECONOMY_FILE, economy)
-    await interaction.followup.send(result)
+    save_store(ECONOMY_STORE, economy)
+
+    if msg.content.strip().lower() in answers:
+        new_balance = update_user_coins(interaction.guild.id, interaction.user.id, 900)
+        await interaction.followup.send(f"💰 Heist success! +900 coins. New balance: {new_balance}")
+    else:
+        new_balance = update_user_coins(interaction.guild.id, interaction.user.id, -300)
+        await interaction.followup.send(f"🚔 Wrong answer! You got caught by the police! -300 coins. New balance: {new_balance}")
 
 @tree.command(name="roast", description="Roast someone creatively")
 async def roast(interaction: discord.Interaction, member: discord.Member):
@@ -1645,6 +1799,5 @@ async def help_command(interaction: discord.Interaction):
 @bot.command(name="help")
 async def help_prefix(ctx: commands.Context):
     await ctx.send(embed=help_embed(), view=HelpView())
-
 # ================== RUN ==================
 bot.run(os.getenv("DISCORD_TOKEN"))

@@ -2,6 +2,5 @@ discord.py
 pillow
 pytz
 aiohttp
-motor
 pymongo
-dnspython
+certifi
