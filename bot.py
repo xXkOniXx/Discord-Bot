@@ -14,14 +14,15 @@ from pymongo import MongoClient
 GUILD_ID = 1386046923693101076
 
 # --------- MongoDB اتصال ---------
-mongo_uri = os.getenv("MONGO_URI")
-client = MongoClient(mongo_uri)
+from motor.motor_asyncio import AsyncIOMotorClient
 
-db = client["koni_bot"]
+mongo = AsyncIOMotorClient(os.getenv("MONGO_URI"))
+db = mongo["koni_bot"]
 
-economy_collection = db["economy"]
 levels_collection = db["levels"]
+economy_collection = db["economy"]
 settings_collection = db["settings"]
+tracked_roles_collection = db["tracked_roles"]
 
 # ================== INTENTS ==================
 intents = discord.Intents.default()
