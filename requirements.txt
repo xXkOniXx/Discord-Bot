@@ -2,3 +2,5 @@ discord.py
 pillow
 pytz
 aiohttp
+pymongo
+certifi
