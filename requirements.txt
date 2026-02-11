@@ -2,4 +2,5 @@ discord.py
 pillow
 pytz
 aiohttp
+motor
 pymongo
