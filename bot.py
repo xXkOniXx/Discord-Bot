@@ -26,8 +26,16 @@ TRACKED_FILE = "tracked_roles.json"
 LEVEL_FILE = "leveling_data.json"
 SETTINGS_FILE = "leveling_settings.json"
 
-# ================== JSON UTILS ==================
-def load_json(path, default=None):
+# ================== UTILS ==================
+MONGO_URI = os.getenv("MONGO_URI")
+mongo = AsyncIOMotorClient(MONGO_URI)
+db = mongo["koni_bot"]
+
+levels_collection = db["levels"]
+economy_collection = db["economy"]
+settings_collection = db["settings"]
+tracked_roles_collection = db["tracked_roles"]
+
 # ================== DATABASE ==================
 MONGO_URI = os.getenv("MONGO_URI")
 if not MONGO_URI:
