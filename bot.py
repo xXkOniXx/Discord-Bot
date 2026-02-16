@@ -29,15 +29,19 @@ SETTINGS_FILE = "leveling_settings.json"
 MONGO_URI = os.getenv("MONGO_URI")
 
 # ================== Mongo ==================
-def connect_to_mongo():
+
 mongo_client = None
 store_collection = None
 mongo_ready = False
 store_fallback_cache = {}
 
-if not MONGO_URI:
-    print("⚠️ MONGO_URI is not set. Running with in-memory fallback storage only.")
-else:
+def connect_to_mongo():
+    global mongo_client, store_collection, mongo_ready, store_fallback_cache
+
+    if not MONGO_URI:
+        print("⚠️ MONGO_URI is not set. Running with in-memory fallback storage only.")
+        return
+
     try:
         mongo_client = MongoClient(
             MONGO_URI,
@@ -55,6 +59,7 @@ else:
         print(f"⚠️ MongoDB unavailable on startup, using in-memory fallback: {mongo_error}")
     except Exception as mongo_error:
         print(f"⚠️ Unexpected Mongo setup error, using in-memory fallback: {mongo_error}")
+
 
 TRACKED_STORE = "tracked_roles"
 LEVEL_STORE = "leveling_data"
