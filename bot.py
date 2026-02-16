@@ -1332,8 +1332,6 @@ async def rolerewards(interaction: discord.Interaction):
     embed = discord.Embed(title="🎖️ Level Role Rewards", description=desc, color=discord.Color.green())
     await interaction.response.send_message(embed=embed)
 
-# ================== RUN ==================
-bot.run(os.getenv("DISCORD_TOKEN"))
 # ======================================================
 # ================== NEW COMMANDS ======================
 # ======================================================
