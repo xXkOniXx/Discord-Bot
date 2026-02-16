@@ -1,9 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-import json, os, random, io, time
-import asyncio
-import os, random, io, time, json
+import os, random, io, time, asyncio
 import certifi
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
@@ -17,14 +15,9 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 tree = bot.tree
 
-# ================== FILES ==================
-TRACKED_FILE = "tracked_roles.json"
-LEVEL_FILE = "leveling_data.json"
-SETTINGS_FILE = "leveling_settings.json"
 # ================== DATABASE ==================
 MONGO_URI = os.getenv("MONGO_URI")
 
@@ -35,8 +28,14 @@ store_collection = None
 mongo_ready = False
 store_fallback_cache = {}
 
+TRACKED_STORE = "tracked_roles"
+LEVEL_STORE = "leveling_data"
+SETTINGS_STORE = "leveling_settings"
+ECONOMY_STORE = "economy_data"
+
+
 def connect_to_mongo():
-    global mongo_client, store_collection, mongo_ready, store_fallback_cache
+    global mongo_client, store_collection, mongo_ready
 
     if not MONGO_URI:
         print("⚠️ MONGO_URI is not set. Running with in-memory fallback storage only.")
@@ -47,113 +46,64 @@ def connect_to_mongo():
             MONGO_URI,
             tls=True,
             tlsCAFile=certifi.where(),
-            serverSelectionTimeoutMS=1500,
-            connectTimeoutMS=1500,
-            socketTimeoutMS=1500,
+            serverSelectionTimeoutMS=3000,
         )
         db = mongo_client["discord_bot"]
         store_collection = db["stores"]
         mongo_client.admin.command("ping")
         mongo_ready = True
-    except PyMongoError as mongo_error:
-        print(f"⚠️ MongoDB unavailable on startup, using in-memory fallback: {mongo_error}")
-    except Exception as mongo_error:
-        print(f"⚠️ Unexpected Mongo setup error, using in-memory fallback: {mongo_error}")
-
-
-TRACKED_STORE = "tracked_roles"
-LEVEL_STORE = "leveling_data"
-SETTINGS_STORE = "leveling_settings"
-ECONOMY_STORE = "economy_data"
-
-LEGACY_STORE_FILES = {
-    TRACKED_STORE: ["tracked_roles.json", "tracked_roles.json.txt"],
-    LEVEL_STORE: ["leveling_data.json", "leveling_data.json.txt"],
-    SETTINGS_STORE: ["leveling_settings.json", "leveling_settings.json.txt"],
-    ECONOMY_STORE: ["economy_data.json", "economy_data.json.txt"],
-}
-
-
-def _read_legacy_json(path: str):
-    if not os.path.exists(path):
-        return default if default is not None else {}
-    with open(path, "r") as f:
-        return json.load(f)
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as legacy_file:
-            return json.load(legacy_file)
-    except (OSError, json.JSONDecodeError):
-        return None
-
-
-def _migrate_store_if_needed(name: str):
-    if not mongo_ready or store_collection is None:
-        return
-    if store_collection.find_one({"_id": name}) is not None:
-        return
-    for file_path in LEGACY_STORE_FILES.get(name, []):
-        legacy_data = _read_legacy_json(file_path)
-        if legacy_data is not None:
-            store_collection.insert_one({"_id": name, "data": legacy_data})
-            print(f"📦 Migrated legacy JSON into MongoDB store: {name} ({file_path})")
-            return
+        print("✅ Connected to MongoDB")
+    except PyMongoError as e:
+        print(f"⚠️ MongoDB connection failed: {e}")
+        mongo_ready = False
 
 
 def load_store(name: str, default=None):
     global mongo_ready
-    base_default = default if default is not None else {}
-    if name in store_fallback_cache:
-        return store_fallback_cache[name]
+    if default is None:
+        default = {}
 
     if not mongo_ready or store_collection is None:
-        store_fallback_cache[name] = base_default
-        return store_fallback_cache[name]
+        return store_fallback_cache.get(name, default)
 
     try:
-        _migrate_store_if_needed(name)
         doc = store_collection.find_one({"_id": name})
-        if doc is None:
-            store_collection.insert_one({"_id": name, "data": base_default})
-            return base_default
-        return doc.get("data", base_default)
-    except PyMongoError as mongo_error:
-        print(f"⚠️ Mongo load failed for {name}, using in-memory fallback: {mongo_error}")
+        if not doc:
+            store_collection.insert_one({"_id": name, "data": default})
+            return default
+        return doc.get("data", default)
+    except PyMongoError as e:
+        print(f"⚠️ Mongo load failed for {name}: {e}")
         mongo_ready = False
-        store_fallback_cache[name] = base_default
-        return store_fallback_cache[name]
+        return store_fallback_cache.get(name, default)
 
 
 def save_store(name: str, data):
     global mongo_ready
     store_fallback_cache[name] = data
+
     if not mongo_ready or store_collection is None:
         return
 
-def save_json(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=4)
     try:
         store_collection.update_one(
             {"_id": name},
             {"$set": {"data": data}},
             upsert=True,
         )
-    except PyMongoError as mongo_error:
-        print(f"⚠️ Mongo save failed for {name}, data kept in-memory: {mongo_error}")
+    except PyMongoError as e:
+        print(f"⚠️ Mongo save failed for {name}: {e}")
         mongo_ready = False
+
 
 # ================== DEFAULT SETTINGS ==================
 def default_settings():
     return {
-        "xp_range": [10, 20],
-        "cooldown": 60,
         "xp_range": [30, 60],
-        "cooldown": 5,
+        "cooldown": 2,
         "ignored_channels": [],
         "role_rewards": {},
         "levelup_bg": None,
-        "rank_backgrounds": {},
         "rank_backgrounds": {},
         "xp_multiplier": 1.0,
         "level_channel": None,
@@ -224,6 +174,9 @@ def get_user_coins(guild_id, user_id):
     user = ensure_user_economy(economy_guild, user_id)
     save_store(ECONOMY_STORE, economy)
     return user.get("coins", 0)
+
+settings = load_store(SETTINGS_STORE, {})
+return settings.setdefault(str(guild_id), default_settings()), settings
 
 
 SHOP_BACKGROUNDS = {
@@ -857,7 +810,6 @@ def tracked_roles_list_embed(guild, role_ids):
 @tree.command(name="trackrole")
 @app_commands.checks.has_permissions(administrator=True)
 async def trackrole(interaction: discord.Interaction, role: discord.Role):
-    data = load_json(TRACKED_FILE)
     data = load_store(TRACKED_STORE, {})
     gid = str(interaction.guild.id)
     data.setdefault(gid, {})
@@ -865,7 +817,6 @@ async def trackrole(interaction: discord.Interaction, role: discord.Role):
     msg = await interaction.channel.send(embed=role_embed(role))
     data[gid][str(role.id)] = {"channel": interaction.channel.id, "message": msg.id}
 
-    save_json(TRACKED_FILE, data)
     save_store(TRACKED_STORE, data)
     await interaction.response.send_message("✅ Role tracked", ephemeral=True)
 
@@ -939,8 +890,8 @@ async def auto_update():
             except:
                 pass
 
-@tasks.loop(minutes=5)
-async def auto_update_tracked_list():
+@tasks.loop(minutes=10)
+async def auto_update():
     data = load_store(TRACKED_STORE, {})
     for guild in bot.guilds:
         gid = str(guild.id)
@@ -1333,8 +1284,9 @@ async def rolerewards(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 # ======================================================
-# ================== NEW COMMANDS ======================
+# ================== NEW COMMANDS/UNSORTED ======================
 # ======================================================
+
 
 @tree.command(name="daily", description="Claim daily XP and coins")
 async def daily(interaction: discord.Interaction):
@@ -1421,7 +1373,7 @@ async def meme(interaction: discord.Interaction):
     embed = discord.Embed(title=data.get("title", "Meme"), color=discord.Color.random())
     embed.set_image(url=data.get("url"))
     await send_response(interaction, embed=embed)
-
+    
 @tree.command(name="prestige", description="Prestige when you hit max level")
 async def prestige(interaction: discord.Interaction):
     glevels, levels = get_level_data(interaction.guild.id)
@@ -1804,6 +1756,24 @@ async def help_command(interaction: discord.Interaction):
 @bot.command(name="help")
 async def help_prefix(ctx: commands.Context):
     await ctx.send(embed=help_embed(), view=HelpView())
-# ================== RUN ==================
+
+
+# ================== EVENTS ==================
+
+@bot.event
+async def on_ready():
+    connect_to_mongo()
+
+    if not auto_update.is_running():
+        auto_update.start()
+
+    if not auto_update_tracked_list.is_running():
+        auto_update_tracked_list.start()
+
+    print(f"✅ Logged in as {bot.user}")
+
+
+# ================== START BOT ==================
+
 bot.run(os.getenv("DISCORD_TOKEN"))
 
