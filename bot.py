@@ -175,8 +175,10 @@ def get_user_coins(guild_id, user_id):
     save_store(ECONOMY_STORE, economy)
     return user.get("coins", 0)
 
-settings = load_store(SETTINGS_STORE, {})
-return settings.setdefault(str(guild_id), default_settings()), settings
+def get_settings_data(settings_store, guild_id):
+    settings = settings_store
+    return settings.setdefault(str(guild_id), default_settings()), settings
+
 
 
 SHOP_BACKGROUNDS = {
