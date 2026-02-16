@@ -153,7 +153,7 @@ def default_settings():
         "ignored_channels": [],
         "role_rewards": {},
         "levelup_bg": None,
-        "rank_backgrounds": {}
+        "rank_backgrounds": {},
         "rank_backgrounds": {},
         "xp_multiplier": 1.0,
         "level_channel": None,
