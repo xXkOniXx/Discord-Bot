@@ -28,8 +28,8 @@ SETTINGS_FILE = "leveling_settings.json"
 # ================== DATABASE ==================
 MONGO_URI = os.getenv("MONGO_URI")
 
-# ================== JSON UTILS ==================
-def load_json(path, default=None):
+# ================== Mongo ==================
+def connect_to_mongo():
 mongo_client = None
 store_collection = None
 mongo_ready = False
