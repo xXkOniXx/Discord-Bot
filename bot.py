@@ -1129,35 +1129,26 @@ async def on_voice_state_update(member, before, after):
     if member.bot or not member.guild:
         return
 
-        reward = gset["role_rewards"].get(str(user["level"]))
-        if reward:
-            role = message.guild.get_role(int(reward))
-            if role:
-                await message.author.add_roles(role)
+    # User joined a voice channel
     if before.channel is None and after.channel is not None:
         gset, settings = get_guild_settings(member.guild.id)
         economy_guild, economy = get_economy_data(member.guild.id)
         econ_user = ensure_user_economy(economy_guild, member.id)
+
         if not econ_user.get("voice_bonus", True):
             return
 
-        img = await create_levelup_image(message.author, user["level"], gset.get("levelup_bg"))
         now = time.time()
         if now - econ_user.get("last_voice_bonus", 0) < gset.get("voice_bonus_cooldown", 300):
             return
 
-        await message.channel.send(
-            f"🎉 {message.author.mention} reached Level {user['level']}!",
-            file=discord.File(img, "levelup.png")
-        )
+        # Get leveling data
         glevels, levels = get_level_data(member.guild.id)
         user = glevels.setdefault(str(member.id), {"xp": 0, "level": 1, "last": 0})
 
-    save_json(LEVEL_FILE, levels)
-    save_json(SETTINGS_FILE, settings)
-    await bot.process_commands(message)
         bonus_xp = gset.get("voice_bonus_xp", 10)
         bonus_xp = int(bonus_xp * gset.get("xp_multiplier", 1.0))
+
         user["xp"] += bonus_xp
         econ_user["last_voice_bonus"] = now
 
