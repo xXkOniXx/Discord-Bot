@@ -10,6 +10,23 @@ from PIL import Image, ImageDraw, ImageFont
 
 GUILD_ID = 1386046923693101076
 
+
+
+from pymongo.mongo_client import MongoClient
+from pymongo.server_api import ServerApi
+
+uri = "mongodb+srv://koni:<db_password>@konizbot.7oygccg.mongodb.net/?appName=Konizbot"
+
+# Create a new client and connect to the server
+client = MongoClient(uri, server_api=ServerApi('1'))
+
+# Send a ping to confirm a successful connection
+try:
+    client.admin.command('ping')
+    print("Pinged your deployment. You successfully connected to MongoDB!")
+except Exception as e:
+    print(e)
+    
 # ================== INTENTS ==================
 intents = discord.Intents.default()
 intents.members = True
