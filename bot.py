@@ -759,22 +759,35 @@ ROAST_LINES = [
     "You're an update that fixed nothing."
 ]
 
+
 # ================== READY ==================
+from discord.ext import tasks
+
+@tasks.loop(minutes=5)
+async def auto_update():
+    print("🔄 Running auto_update...")
+
+@tasks.loop(minutes=10)
+async def auto_update_tracked_list():
+    print("📋 Updating tracked list...")
+
+
 @bot.event
 async def on_ready():
     print("🔄 Syncing commands globally...")
 
     try:
-        synced = await tree.sync()  # Global sync (no guild wipe)
+        synced = await tree.sync()
         print(f"✅ Synced {len(synced)} commands globally")
     except Exception as e:
         print(f"❌ Sync error: {e}")
 
-    auto_update.start()
     if not auto_update.is_running():
         auto_update.start()
+
     if not auto_update_tracked_list.is_running():
         auto_update_tracked_list.start()
+
     print(f"🤖 Logged in as {bot.user}")
 
 
