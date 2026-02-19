@@ -1063,15 +1063,6 @@ async def apply_level_ups(message: discord.Message, user: dict, gset: dict):
                 file=discord.File(img, "levelup.png")
             )
 
-
-                gset, _ = get_guild_settings(message.guild.id)
-tracked_roles = gset.get("tracked_roles", [])
-
-if tracked_roles:
-    if not any(role.id in tracked_roles for role in message.author.roles):
-        return
-
-            )
             
 
 @bot.event
@@ -1089,6 +1080,28 @@ async def on_message(message):
     economy_guild, economy = get_economy_data(message.guild.id)
     econ_user = ensure_user_economy(economy_guild, message.author.id)
     user = glevels.setdefault(str(message.author.id), {"xp": 0, "level": 1, "last": 0})
+
+    @bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    if not message.guild:
+        return
+
+    glevels, levels = get_level_data(message.guild.id)
+    user = glevels.setdefault(str(message.author.id), {"xp": 0, "level": 1, "last": 0})
+
+    # ✅ ROLE TRACK CHECK HERE
+    gset, _ = get_guild_settings(message.guild.id)
+    tracked_roles = gset.get("tracked_roles", [])
+
+    if tracked_roles:
+        if not any(role.id in tracked_roles for role in message.author.roles):
+            return
+
+    # continue XP logic...
+
 
     if str(message.channel.id) in gset["ignored_channels"]:
         return
@@ -1128,6 +1141,10 @@ async def on_message(message):
     if user["xp"] >= xp_needed(user["level"]):
         user["xp"] -= xp_needed(user["level"])
         user["level"] += 1
+
+
+
+        
 @bot.event
 async def on_voice_state_update(member, before, after):
     if member.bot or not member.guild:
