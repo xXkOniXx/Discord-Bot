@@ -1045,12 +1045,24 @@ async def apply_level_ups(message: discord.Message, user: dict, gset: dict):
 
         level_notify = gset.get("level_notify", {}).get(str(message.author.id), True)
         if level_notify:
-            img = await create_levelup_image(message.author, user["level"], gset.get("levelup_bg"))
+            img = await create_levelup_image(
+                message.author,
+                user["level"],
+                gset.get("levelup_bg")
+            )
+
             level_channel_id = gset.get("level_channel")
-            level_channel = message.guild.get_channel(level_channel_id) if level_channel_id else message.channel
+            level_channel = (
+                message.guild.get_channel(level_channel_id)
+                if level_channel_id
+                else message.channel
+            )
+
             await level_channel.send(
                 f"🎉 {message.author.mention} reached Level {user['level']}!",
                 file=discord.File(img, "levelup.png")
+            )
+
 
                 gset, _ = get_guild_settings(message.guild.id)
 tracked_roles = gset.get("tracked_roles", [])
