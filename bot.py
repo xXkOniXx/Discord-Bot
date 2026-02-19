@@ -1051,7 +1051,16 @@ async def apply_level_ups(message: discord.Message, user: dict, gset: dict):
             await level_channel.send(
                 f"🎉 {message.author.mention} reached Level {user['level']}!",
                 file=discord.File(img, "levelup.png")
+
+                gset, _ = get_guild_settings(message.guild.id)
+tracked_roles = gset.get("tracked_roles", [])
+
+if tracked_roles:
+    if not any(role.id in tracked_roles for role in message.author.roles):
+        return
+
             )
+            
 
 @bot.event
 async def on_message(message):
@@ -1788,10 +1797,222 @@ async def help_command(interaction: discord.Interaction):
 @bot.command(name="help")
 async def help_prefix(ctx: commands.Context):
     await ctx.send(embed=help_embed(), view=HelpView())
+    
+# ================== /rank ==================
+
+@tree.command(name="rank", description="View your rank card")
+async def rank(interaction: discord.Interaction, member: Optional[discord.Member] = None):
+    await interaction.response.defer()
+
+    member = member or interaction.user
+    glevels, _ = get_level_data(interaction.guild.id)
+
+    user = glevels.get(str(member.id))
+    if not user:
+        await interaction.followup.send("❌ No level data found for that user.")
+        return
+
+    level = user.get("level", 1)
+    xp = user.get("xp", 0)
+    required_xp = 100 + (level * 50)
+
+    avatar_path = f"avatar_{member.id}.png"
+    await member.display_avatar.save(avatar_path)
+
+    card_path = create_animated_rank_card(
+        member,
+        level,
+        xp,
+        required_xp,
+        avatar_path
+    )
+
+    await interaction.followup.send(file=discord.File(card_path))
+    
+# ================== /leaderboard ==================
+
+@tree.command(name="leaderboard", description="View top level members")
+async def leaderboard(interaction: discord.Interaction):
+    glevels, _ = get_level_data(interaction.guild.id)
+
+    if not glevels:
+        await interaction.response.send_message("No leaderboard data yet.")
+        return
+
+    sorted_users = sorted(
+        glevels.items(),
+        key=lambda x: (x[1].get("level", 1), x[1].get("xp", 0)),
+        reverse=True
+    )[:10]
+
+    embed = discord.Embed(title="🏆 Level Leaderboard", color=discord.Color.gold())
+
+    for i, (user_id, data) in enumerate(sorted_users, start=1):
+        member = interaction.guild.get_member(int(user_id))
+        if member:
+            embed.add_field(
+                name=f"{i}. {member.display_name}",
+                value=f"Level {data.get('level', 1)} | {data.get('xp', 0)} XP",
+                inline=False
+            )
+
+    await interaction.response.send_message(embed=embed)
+    
+# ================== /Role tracking ==================
+
+@tree.command(name="trackrole", description="Give XP only to users with this role")
+@app_commands.checks.has_permissions(administrator=True)
+async def trackrole(interaction: discord.Interaction, role: discord.Role):
+    gset, settings = get_guild_settings(interaction.guild.id)
+    tracked = gset.setdefault("tracked_roles", [])
+
+    if role.id in tracked:
+        await interaction.response.send_message("Role already tracked.", ephemeral=True)
+        return
+
+    tracked.append(role.id)
+    save_store(SETTINGS_STORE, settings)
+    await interaction.response.send_message(f"✅ Now tracking XP for {role.mention}", ephemeral=True)
+
+@tree.command(name="untrackrole", description="Stop tracking a role for XP")
+@app_commands.checks.has_permissions(administrator=True)
+async def untrackrole(interaction: discord.Interaction, role: discord.Role):
+    gset, settings = get_guild_settings(interaction.guild.id)
+    tracked = gset.setdefault("tracked_roles", [])
+
+    if role.id not in tracked:
+        await interaction.response.send_message("Role not tracked.", ephemeral=True)
+        return
+
+    tracked.remove(role.id)
+    save_store(SETTINGS_STORE, settings)
+    await interaction.response.send_message(f"❌ Stopped tracking {role.mention}", ephemeral=True)
+@tree.command(name="trackroleall", description="Allow XP for all roles")
+@app_commands.checks.has_permissions(administrator=True)
+async def trackroleall(interaction: discord.Interaction):
+    gset, settings = get_guild_settings(interaction.guild.id)
+    gset["tracked_roles"] = []
+    save_store(SETTINGS_STORE, settings)
+    await interaction.response.send_message("✅ XP now works for all roles.", ephemeral=True)
+    
+@tree.command(name="trackroleall", description="Allow XP for all roles")
+@app_commands.checks.has_permissions(administrator=True)
+async def trackroleall(interaction: discord.Interaction):
+    gset, settings = get_guild_settings(interaction.guild.id)
+    gset["tracked_roles"] = []
+    save_store(SETTINGS_STORE, settings)
+    await interaction.response.send_message("✅ XP now works for all roles.", ephemeral=True)
+    
+@tree.command(name="trackrolelist", description="Show tracked XP roles")
+async def trackrolelist(interaction: discord.Interaction):
+    gset, _ = get_guild_settings(interaction.guild.id)
+    tracked = gset.get("tracked_roles", [])
+
+    if not tracked:
+        await interaction.response.send_message("XP works for all roles.")
+        return
+
+    roles = [interaction.guild.get_role(rid) for rid in tracked]
+    mentions = [r.mention for r in roles if r]
+
+    await interaction.response.send_message(
+        "Tracked roles:\n" + "\n".join(mentions)
+
+@tree.command(name="setcooldown", description="Set XP message cooldown (seconds)")
+@app_commands.checks.has_permissions(administrator=True)
+async def setcooldown(interaction: discord.Interaction, seconds: int):
+    if seconds < 0:
+        await interaction.response.send_message("❌ Cooldown must be 0 or higher.", ephemeral=True)
+        return
+
+    gset, settings = get_guild_settings(interaction.guild.id)
+    gset["xp_cooldown"] = seconds
+    save_store(SETTINGS_STORE, settings)
+
+    await interaction.response.send_message(
+        f"✅ XP cooldown set to {seconds} seconds.",
+        ephemeral=True
+    )
+
+@tree.command(name="setlevelupbackground", description="Set level-up image background (image URL)")
+@app_commands.checks.has_permissions(administrator=True)
+async def setlevelupbackground(interaction: discord.Interaction, image_url: str):
+    gset, settings = get_guild_settings(interaction.guild.id)
+    gset["levelup_background"] = image_url
+    save_store(SETTINGS_STORE, settings)
+
+    await interaction.response.send_message(
+        "✅ Level-up background updated.",
+        ephemeral=True
+    )
+
+@tree.command(name="setrankbackground", description="Set your active rank background")
+async def setrankbackground(interaction: discord.Interaction, background: str):
+    background = background.title()
+
+    economy_guild, economy = get_economy_data(interaction.guild.id)
+    user = ensure_user_economy(economy_guild, interaction.user.id)
+
+    if background not in user.get("backgrounds", []):
+        await interaction.response.send_message("❌ You don't own that background.", ephemeral=True)
+        return
+
+    user["active_background"] = background
+    save_store(ECONOMY_STORE, economy)
+
+    await interaction.response.send_message(
+        f"🎨 Rank background set to **{background}**.",
+        ephemeral=True
+
+        bg = gset.get("levelup_background")
+if bg:
+    embed.set_image(url=bg)
+
+    )
+
+@tree.command(name="rolerewards", description="View configured level role rewards")
+async def rolerewards(interaction: discord.Interaction):
+    gset, _ = get_guild_settings(interaction.guild.id)
+    rewards = gset.get("role_rewards", {})
+
+    if not rewards:
+        await interaction.response.send_message("No level rewards configured.")
+        return
+
+    embed = discord.Embed(title="🏆 Level Role Rewards", color=discord.Color.green())
+
+    for level, role_id in sorted(rewards.items(), key=lambda x: int(x[0])):
+        role = interaction.guild.get_role(int(role_id))
+        if role:
+            embed.add_field(
+                name=f"Level {level}",
+                value=role.mention,
+                inline=False
+            )
+
+    await interaction.response.send_message(embed=embed)
 
 
-# ================== EVENTS ==================
+@tree.command(name="removerolereward", description="Remove a level role reward")
+@app_commands.checks.has_permissions(administrator=True)
+async def removerolereward(interaction: discord.Interaction, level: int):
+    gset, settings = get_guild_settings(interaction.guild.id)
+    rewards = gset.get("role_rewards", {})
 
+    if str(level) not in rewards:
+        await interaction.response.send_message("❌ No reward set for that level.", ephemeral=True)
+        return
+
+    del rewards[str(level)]
+    save_store(SETTINGS_STORE, settings)
+
+    await interaction.response.send_message(
+        f"❌ Removed reward for level {level}.",
+        ephemeral=True
+    )
+
+
+# ================== Events  ==================
 @bot.event
 async def on_ready():
     connect_to_mongo()
