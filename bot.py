@@ -503,9 +503,9 @@ async def create_levelup_image(member, level, bg_path):
     draw.text((250, 70), f"{member.display_name} reached Level {level}!", font=font, fill=(255, 255, 255))
 
     buf.seek(0)
-av = Image.open(buf).convert("RGBA").resize((120, 120))
-mask = av.split()[3]  # extract alpha channel as mask
-bg.paste(av, (50, 40), mask)
+    av = Image.open(buf).convert("RGBA").resize((120, 120))
+    mask = av.split()[3]  # extract alpha channel as mask
+    bg.paste(av, (50, 40), mask)
 
     out = io.BytesIO()
     bg.save(out, "PNG")
