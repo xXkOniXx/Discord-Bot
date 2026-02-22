@@ -1081,7 +1081,7 @@ async def on_message(message):
     econ_user = ensure_user_economy(economy_guild, message.author.id)
     user = glevels.setdefault(str(message.author.id), {"xp": 0, "level": 1, "last": 0})
 
-    @bot.event
+@bot.event
 async def on_message(message):
     if message.author.bot:
         return
