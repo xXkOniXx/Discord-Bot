@@ -1827,36 +1827,6 @@ async def help_command(interaction: discord.Interaction):
 async def help_prefix(ctx: commands.Context):
     await ctx.send(embed=help_embed(), view=HelpView())
     
-# ================== /rank ==================
-
-@tree.command(name="rank", description="View your rank card")
-async def rank(interaction: discord.Interaction, member: Optional[discord.Member] = None):
-    await interaction.response.defer()
-
-    member = member or interaction.user
-    glevels, _ = get_level_data(interaction.guild.id)
-
-    user = glevels.get(str(member.id))
-    if not user:
-        await interaction.followup.send("❌ No level data found for that user.")
-        return
-
-    level = user.get("level", 1)
-    xp = user.get("xp", 0)
-    required_xp = 100 + (level * 50)
-
-    avatar_path = f"avatar_{member.id}.png"
-    await member.display_avatar.save(avatar_path)
-
-    card_path = create_animated_rank_card(
-        member,
-        level,
-        xp,
-        required_xp,
-        avatar_path
-    )
-
-    await interaction.followup.send(file=discord.File(card_path))
     
 # ================== /leaderboard ==================
 
