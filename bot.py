@@ -8,25 +8,6 @@ from pymongo.errors import PyMongoError
 from typing import Optional
 from PIL import Image, ImageDraw, ImageFont
 
-GUILD_ID = 1386046923693101076
-
-
-
-from pymongo.mongo_client import MongoClient
-from pymongo.server_api import ServerApi
-
-uri = "mongodb+srv://koni:<db_password>@konizbot.7oygccg.mongodb.net/?appName=Konizbot"
-
-# Create a new client and connect to the server
-client = MongoClient(uri, server_api=ServerApi('1'))
-
-# Send a ping to confirm a successful connection
-try:
-    client.admin.command('ping')
-    print("Pinged your deployment. You successfully connected to MongoDB!")
-except Exception as e:
-    print(e)
-    
 # ================== INTENTS ==================
 intents = discord.Intents.default()
 intents.members = True
@@ -38,17 +19,15 @@ tree = bot.tree
 # ================== DATABASE ==================
 MONGO_URI = os.getenv("MONGO_URI")
 
-# ================== Mongo ==================
+TRACKED_STORE = "tracked_roles"
+LEVEL_STORE = "leveling_data"
+SETTINGS_STORE = "leveling_settings"
+ECONOMY_STORE = "economy_data"
 
 mongo_client = None
 store_collection = None
 mongo_ready = False
 store_fallback_cache = {}
-
-TRACKED_STORE = "tracked_roles"
-LEVEL_STORE = "leveling_data"
-SETTINGS_STORE = "leveling_settings"
-ECONOMY_STORE = "economy_data"
 
 
 def connect_to_mongo():
@@ -128,10 +107,13 @@ def default_settings():
         "max_level": 100,
         "voice_bonus_xp": 60,
         "voice_bonus_cooldown": 100,
+        "tracked_roles": [],
     }
+
 
 def xp_needed(level):
     return 100 + level * 75
+
 
 def default_economy_user():
     return {
@@ -151,23 +133,36 @@ def default_economy_user():
         "last_voice_bonus": 0,
         "afk": False,
         "afk_reason": None,
-        "married_to": None
+        "married_to": None,
+        "active_background": None,
     }
+
 
 def get_guild_settings(guild_id):
     settings = load_store(SETTINGS_STORE, {})
     return settings.setdefault(str(guild_id), default_settings()), settings
 
+
 def get_level_data(guild_id):
     levels = load_store(LEVEL_STORE, {})
     return levels.setdefault(str(guild_id), {}), levels
+
 
 def get_economy_data(guild_id):
     economy = load_store(ECONOMY_STORE, {})
     return economy.setdefault(str(guild_id), {}), economy
 
+
 def ensure_user_economy(economy_guild, user_id):
-    return economy_guild.setdefault(str(user_id), default_economy_user())
+    uid = str(user_id)
+    if uid not in economy_guild:
+        economy_guild[uid] = default_economy_user()
+    else:
+        # Fill in any missing keys from default
+        defaults = default_economy_user()
+        for k, v in defaults.items():
+            economy_guild[uid].setdefault(k, v)
+    return economy_guild[uid]
 
 
 def update_user_coins(guild_id, user_id, delta):
@@ -192,12 +187,8 @@ def get_user_coins(guild_id, user_id):
     save_store(ECONOMY_STORE, economy)
     return user.get("coins", 0)
 
-def get_settings_data(settings_store, guild_id):
-    settings = settings_store
-    return settings.setdefault(str(guild_id), default_settings()), settings
 
-
-
+# ================== CONSTANTS ==================
 SHOP_BACKGROUNDS = {
     "Galaxy": 500,
     "Neon": 750,
@@ -205,16 +196,9 @@ SHOP_BACKGROUNDS = {
 }
 
 EIGHT_BALL_RESPONSES = [
-    "It is certain.",
-    "Without a doubt.",
-    "Yes - definitely.",
-    "Reply hazy, try again.",
-    "Ask again later.",
-    "Better not tell you now.",
-    "My sources say no.",
-    "Very doubtful.",
-    "Absolutely!",
-    "Don't count on it."
+    "It is certain.", "Without a doubt.", "Yes - definitely.",
+    "Reply hazy, try again.", "Ask again later.", "Better not tell you now.",
+    "My sources say no.", "Very doubtful.", "Absolutely!", "Don't count on it."
 ]
 
 CONVERSATION_STARTERS = [
@@ -334,52 +318,17 @@ HELP_COMMANDS = [
     {"name": "leaderboard", "usage": "/leaderboard", "desc": "Show leaderboard."},
     {"name": "setxp", "usage": "/setxp <min> <max>", "desc": "Set XP range."},
     {"name": "setcooldown", "usage": "/setcooldown <seconds>", "desc": "Set XP cooldown."},
-    {"name": "setrankbackground", "usage": "/setrankbackground <image>", "desc": "Set rank background."},
-    {"name": "setlevelupbackground", "usage": "/setlevelupbackground <image>", "desc": "Set level-up background."},
+    {"name": "setrankbackground", "usage": "/setrankbackground <background>", "desc": "Set rank background."},
+    {"name": "setlevelupbackground", "usage": "/setlevelupbackground <url>", "desc": "Set level-up background URL."},
     {"name": "setrolereward", "usage": "/setrolereward <level> @role", "desc": "Set role reward."},
     {"name": "removerolereward", "usage": "/removerolereward <level>", "desc": "Remove role reward."},
     {"name": "rolerewards", "usage": "/rolerewards", "desc": "List role rewards."},
-    {"name": "trackrole", "usage": "/trackrole @role", "desc": "Track a role count."},
-    {"name": "untrackrole", "usage": "/untrackrole @role", "desc": "Untrack a role."},
-    {"name": "trackrolelist", "usage": "/trackrolelist", "desc": "Post tracked roles list."},
-    {"name": "trackroleall", "usage": "/trackroleall", "desc": "Track all roles."},
-    {"name": "untrackroleall", "usage": "/untrackroleall", "desc": "Untrack all roles."}
+    {"name": "trackrole", "usage": "/trackrole @role", "desc": "Restrict XP to a role."},
+    {"name": "untrackrole", "usage": "/untrackrole @role", "desc": "Remove XP role restriction."},
+    {"name": "trackrolelist", "usage": "/trackrolelist", "desc": "List XP-restricted roles."},
+    {"name": "trackroleall", "usage": "/trackroleall", "desc": "Allow XP for all roles."},
 ]
 
-def help_embed():
-    categories = {
-        "🎮 Fun / Social": ["daily", "rep", "coinflip", "8ball", "meme", "roast"],
-        "🏆 Leveling": ["rank", "leaderboard", "prestige", "levelroles", "levelnotify", "backgrounds"],
-        "💬 Chat Boosters": ["question", "wouldyourather", "topic"],
-        "🛠️ Admin": ["setlevelchannel", "setxpmultiplier", "blacklistxp", "resetuserxp", "setlevel", "setxp", "setcooldown"],
-        "💰 Economy": ["balance", "givecoins", "setbalance", "work", "shop", "buybackground", "gamblerist", "koniheist", "divorce"],
-        "🎨 Cosmetics": ["setcolor", "setbadge", "profile", "voicebonus", "afk", "marry"],
-        "📌 Role Tracking": ["trackrole", "untrackrole", "trackrolelist", "trackroleall", "untrackroleall"],
-        "🖼️ Backgrounds": ["setrankbackground", "setlevelupbackground", "setrolereward", "removerolereward", "rolerewards"]
-    }
-    embed = discord.Embed(
-        title="📖 Command Center",
-        description="Use the buttons below to run popular commands without typing `/`, or select a command to view usage.",
-        color=discord.Color.blurple()
-    )
-    for title, items in categories.items():
-        embed.add_field(name=title, value=", ".join(items), inline=False)
-    return embed
-
-def command_lookup(name):
-    for cmd in HELP_COMMANDS:
-        if cmd["name"] == name:
-            return cmd
-    return None
-
-async def send_response(interaction, content=None, embed=None, ephemeral=False, file=None):
-    payload = {"content": content, "embed": embed, "ephemeral": ephemeral}
-    if file is not None:
-        payload["file"] = file
-    if interaction.response.is_done():
-        await interaction.followup.send(**payload)
-    else:
-        await interaction.response.send_message(**payload)
 ROAST_LINES = [
     "If laughs were XP, you'd still be level 1.",
     "You're the human version of a loading screen.",
@@ -432,512 +381,49 @@ ROAST_LINES = [
     "You're the type to misspell your own name.",
     "You're a checklist with nothing checked.",
     "You're a meme without the funny.",
-    "You're the reason the \"undo\" button exists.",
-    "You're the sequel nobody wanted.",
-    "You're a day-one bug with no hotfix.",
-    "You're the slow clap of disappointment.",
-    "You're the backup plan's backup plan.",
-    "You're a salad without the dressing.",
-    "You're a GPS that says \"recalculating\" forever.",
-    "You're a sunrise in grayscale.",
-    "You're a default ringtone in a world of playlists.",
-    "You're an off-brand superhero.",
-    "You're a puzzle with missing pieces.",
-    "You're a shortcut to nowhere.",
-    "You're the Wi-Fi signal in a basement.",
-    "You're a vending machine that keeps your coins.",
-    "You're a crowd with no cheers.",
-    "You're a mic drop with no mic.",
-    "You're a warm soda on a hot day.",
-    "You're a loading bar stuck at 99%.",
-    "You're a group chat on mute.",
-    "You're the reason autocorrect gives up.",
-    "You're a sock with no pair.",
-    "You're a spoiler in a bad movie.",
-    "You're a \"maybe\" in a world of \"yes.\"",
-    "You're a punchline without the setup.",
-    "You're the dull side of a butter knife.",
-    "You're a pop-up ad with no close button.",
-    "You're a playlist with no bangers.",
-    "You're a flashlight with dying batteries.",
-    "You're a failed captcha.",
-    "You're a sneeze that never comes.",
-    "You're a plot twist no one noticed.",
-    "You're a trophy with no competition.",
-    "You're a selfie without the filter.",
-    "You're a book with missing pages.",
-    "You're a remix that ruined the original.",
-    "You're a bridge to nowhere.",
-    "You're a \"k\" in a sea of messages.",
-    "You're a keyboard missing the spacebar.",
-    "You're a knock-knock joke with no door.",
-    "You're a pizza with no toppings.",
-    "You're a calendar with no weekends.",
-    "You're a donut with no hole.",
-    "You're an elevator stuck between floors.",
-    "You're a battery with no charge.",
-    "You're a prologue with no story.",
-    "You're a trailer that spoiled everything.",
-    "You're a whisper in a thunderstorm.",
-    "You're a firework that won't spark.",
-    "You're a chair with one leg.",
-    "You're a jigsaw missing the corner piece.",
-    "You're a comet that never arrives.",
-    "You're a stopwatch with no time.",
-    "You're a checkbox with no label.",
-    "You're a riddle with no answer.",
-    "You're the \"skip\" button that doesn't work.",
-    "You're a cup of decaf in a rush.",
-    "You're a storm with no rain.",
-    "You're a movie with no plot.",
-    "You're a lantern with no light.",
-    "You're a banter with no bite.",
-    "You're a trophy for participation.",
-    "You're an alarm that never rings.",
-    "You're a lullaby in a mosh pit.",
-    "You're a snowman in summer.",
-    "You're a bookmark in an empty book.",
-    "You're a dial without a number.",
-    "You're a candle with no wick.",
-    "You're a puzzle made of mashed potatoes.",
-    "You're a stopwatch in a slow-motion scene.",
-    "You're a paintbrush without paint.",
-    "You're a compass that points to \"meh.\"",
-    "You're an echo in a void.",
-    "You're a snack that's all crumbs.",
-    "You're a DJ with no drops.",
-    "You're a montage without music.",
-    "You're a high five with no hand.",
-    "You're a fireworks show in broad daylight.",
-    "You're a snowball in a volcano.",
-    "You're a riddle with a typo.",
-    "You're a mirror with no reflection.",
-    "You're a joke that needs subtitles.",
-    "You're a sunset behind clouds.",
-    "You're a ladder to nowhere.",
-    "You're a map with no legend.",
-    "You're a compass pointing to \"nope.\"",
-    "You're a ping with no pong.",
-    "You're a battery that only shows 1%.",
-    "You're a recipe with missing ingredients.",
-    "You're a book with only the index.",
-    "You're a record with no music.",
-    "You're a helmet without a bike.",
-    "You're a tent without poles.",
-    "You're a race with no finish line.",
-    "You're a sandwich with no filling.",
-    "You're a ticket to nowhere.",
-    "You're a parade with no floats.",
-    "You're a lighthouse with no light.",
-    "You're a comedy without timing.",
-    "You're a dance with no rhythm.",
-    "You're a treasure map that leads to socks.",
-    "You're a camera with no lens.",
-    "You're a puzzle with extra pieces.",
-    "You're a marathon with no training.",
-    "You're a nap in a hurricane.",
-    "You're a rocket with no fuel.",
-    "You're a scoreboard with no points.",
-    "You're a cheer with no crowd.",
-    "You're a highlight reel of bloopers.",
-    "You're a script with no dialogue.",
-    "You're a painter who uses invisible ink.",
-    "You're a flashlight in the sun.",
-    "You're a raincoat in the desert.",
-    "You're a handshake with no fingers.",
-    "You're a GPS in airplane mode.",
-    "You're a toaster with no bread.",
-    "You're a pillow with no fluff.",
-    "You're a smile with no teeth.",
-    "You're a marathon in flip-flops.",
-    "You're a drumline with no beat.",
-    "You're a zip file with no data.",
-    "You're a server with no uptime.",
-    "You're a mod with no permissions.",
-    "You're a headphone with one side.",
-    "You're a code block with syntax errors.",
-    "You're a quest with no reward.",
-    "You're a raid boss with no loot.",
-    "You're a potion with no effects.",
-    "You're a level-up with no stats.",
-    "You're a skill tree with no skills.",
-    "You're a crit with no damage.",
-    "You're a mount with no speed.",
-    "You're a guild with no members.",
-    "You're a leaderboard with no names.",
-    "You're a lobby with no players.",
-    "You're a respawn with no checkpoint.",
-    "You're a glitch with no fix.",
-    "You're a loot box with no loot.",
-    "You're a perk with no perks.",
-    "You're a daily quest with no reward.",
-    "You're a dungeon with no exits.",
-    "You're a quest marker on the wrong map.",
-    "You're a leaderboard with negative points.",
-    "You're a rarity that's just common.",
-    "You're an epic fail with rare vibes.",
-    "You're a boss fight with no boss.",
-    "You're a team chat with no team.",
-    "You're a ping with 999ms.",
-    "You're a battle pass with no tiers.",
-    "You're a sprint with no finish.",
-    "You're a patch that added bugs.",
-    "You're a debug log in a love letter.",
-    "You're a settings menu with no options.",
-    "You're a raid with no strategy.",
-    "You're a max level with min effort.",
-    "You're a loot drop of disappointment.",
-    "You're an upgrade that downgraded.",
-    "You're a buff that feels like a nerf.",
-    "You're a nerf disguised as a buff.",
-    "You're a healer who needs healing.",
-    "You're a tank with no armor.",
-    "You're a DPS with no damage.",
-    "You're a support with no support.",
-    "You're a sniper with no scope.",
-    "You're a runner with no stamina.",
-    "You're a mage with no mana.",
-    "You're a rogue with no stealth.",
-    "You're a bard with no song.",
-    "You're a warrior with no sword.",
-    "You're a wizard with no spells.",
-    "You're a potion that's just water.",
-    "You're a scroll with no text.",
-    "You're a shield made of paper.",
-    "You're a sword made of rubber.",
-    "You're a bow with no string.",
-    "You're a spell with no effect.",
-    "You're a trap that doesn't trigger.",
-    "You're a treasure chest with no treasure.",
-    "You're a key with no lock.",
-    "You're a lock with no key.",
-    "You're a map that lies.",
-    "You're a quest giver with no quest.",
-    "You're a quest with no XP.",
-    "You're a campfire with no warmth.",
-    "You're a tavern with no ale.",
-    "You're a dragon with no fire.",
-    "You're a phoenix that never rises.",
-    "You're a storm with no thunder.",
-    "You're a legend nobody heard.",
-    "You're a hero with no story.",
-    "You're a villain with no plan.",
-    "You're a sidekick with no hero.",
-    "You're a cliffhanger that falls flat.",
-    "You're a reboot that nobody watched.",
-    "You're a sequel with no original.",
-    "You're a crossover no one asked for.",
-    "You're a twist that's just tangled.",
-    "You're a finale with no climax.",
-    "You're a teaser with no release.",
-    "You're a leak with no content.",
-    "You're a spoiler for a boring plot.",
-    "You're a recap with no new info.",
-    "You're a binge with no fun.",
-    "You're a marathon of commercials.",
-    "You're a highlight reel of lowlights.",
-    "You're a \"soon\" that never arrives.",
-    "You're a feature stuck in beta.",
-    "You're a keyboard warrior with no Wi-Fi.",
-    "You're a meme from last year.",
-    "You're a screenshot with no context.",
-    "You're a chat bubble with no text.",
-    "You're a status set to \"busy.\"",
-    "You're a notification with no content.",
-    "You're a pin without a board.",
-    "You're a thread with no replies.",
-    "You're a sticker with no stick.",
-    "You're an emoji that nobody uses.",
-    "You're a reaction with no message.",
-    "You're a modmail with no mod.",
-    "You're a server with no boosts.",
-    "You're a ping that's always @everyone.",
-    "You're a loudspeaker with no message.",
-    "You're a voice channel with no voice.",
-    "You're a DM that never gets opened.",
-    "You're a report with no evidence.",
-    "You're a cooldown with no ability.",
-    "You're a queue with no game.",
-    "You're a lobby with no match.",
-    "You're a lost packet.",
-    "You're a dropped frame.",
-    "You're a ping spike.",
-    "You're a laggy day in a fast world.",
-    "You're a buffer wheel in human form.",
-    "You're a loading screen tip nobody reads.",
-    "You're a side note in your own story.",
-    "You're a \"last seen\" in real life.",
-    "You're a ghost message.",
-    "You're a reply that says \"lol\" only.",
-    "You're a joke with no punch.",
-    "You're a pun without the fun.",
-    "You're a summary of nothing.",
-    "You're a blank page.",
-    "You're a highlight that dims.",
-    "You're a spark that fizzles.",
-    "You're a flicker in a blackout.",
-    "You're a vibe check that failed.",
-    "You're a hero who skipped the tutorial.",
-    "You're a legend in your own group chat.",
-    "You're a meme in the worst way.",
-    "You're a plot hole with legs.",
-    "You're a cliff note to a short story.",
-    "You're a chapter that got deleted.",
-    "You're a tune that never lands.",
-    "You're a chorus with no hook.",
-    "You're a beat with no drop.",
-    "You're a rapper with no bars.",
-    "You're a singer with no chorus.",
-    "You're a mixtape of static.",
-    "You're a playlist full of ads.",
-    "You're a radio that only plays dead air.",
-    "You're a ringtone on silent.",
-    "You're a speaker with no volume.",
-    "You're a silent alarm.",
-    "You're a group project with no effort.",
-    "You're the Wi-Fi password nobody remembers.",
-    "You're a password reset email.",
-    "You're a captcha that fails.",
-    "You're a two-factor code that expired.",
-    "You're a download stuck at 0%.",
-    "You're a pop quiz with no answer key.",
-    "You're a sticky note that fell off.",
-    "You're a meeting that should've been an email.",
-    "You're a reply-all in a disaster.",
-    "You're a voicemail nobody checks.",
-    "You're an agenda with no agenda.",
-    "You're a calendar invite to nowhere.",
-    "You're a \"reply later\" that never comes.",
-    "You're a draft with no send.",
-    "You're a screen protector with bubbles.",
-    "You're a screenshot of a black screen.",
-    "You're a selfie with the lens cap on.",
-    "You're a timer that never starts.",
-    "You're a bell that never rings.",
-    "You're a doorbell with no door.",
-    "You're a hallway with no doors.",
-    "You're a keychain with no keys.",
-    "You're a treasure with no map.",
-    "You're a quiz with no questions.",
-    "You're a playlist skip in human form.",
-    "You're a charging cable that only works at one angle.",
-    "You're the \"are you still watching?\" pop-up.",
-    "You're a rainy day with no puddles.",
-    "You're a rainbow in black and white.",
-    "You're the human version of \"maybe later.\"",
-    "You're a notification for low storage.",
-    "You're a software update at 2 AM.",
-    "You're a reboot without the fix.",
-    "You're a recycle bin full of mistakes.",
-    "You're a broken link.",
-    "You're a QR code that leads nowhere.",
-    "You're the last slice no one wants.",
-    "You're a party with no music.",
-    "You're a cake with no frosting.",
-    "You're a candle that got snuffed.",
-    "You're a flashlight that's always dim.",
-    "You're the \"free trial\" that ends early.",
-    "You're the fine print nobody reads.",
-    "You're a warning label with no hazard.",
-    "You're a map that says \"You are lost.\"",
-    "You're a signpost pointing to \"shrug.\"",
-    "You're a GPS that says \"good luck.\"",
-    "You're a trail with no end.",
-    "You're a crossword with no clues.",
-    "You're a puzzle without a picture.",
-    "You're a board game with missing pieces.",
-    "You're a dice roll that always hits 1.",
-    "You're a deck of cards missing aces.",
-    "You're a trophy for last place.",
-    "You're a selfie stick with no phone.",
-    "You're a live stream with no viewers.",
-    "You're a video with no audio.",
-    "You're a podcast that never starts.",
-    "You're a mixtape with only the intro.",
-    "You're a finale that never airs.",
-    "You're a sequel to a forgotten movie.",
-    "You're an update that fixed nothing."
 ]
 
 
-# ================== READY ==================
-from discord.ext import tasks
-
-@tasks.loop(minutes=5)
-async def auto_update():
-    print("🔄 Running auto_update...")
-
-@tasks.loop(minutes=10)
-async def auto_update_tracked_list():
-    print("📋 Updating tracked list...")
-
-
-@bot.event
-async def on_ready():
-    print("🔄 Syncing commands globally...")
-
-    try:
-        synced = await tree.sync()
-        print(f"✅ Synced {len(synced)} commands globally")
-    except Exception as e:
-        print(f"❌ Sync error: {e}")
-
-    if not auto_update.is_running():
-        auto_update.start()
-
-    if not auto_update_tracked_list.is_running():
-        auto_update_tracked_list.start()
-
-    print(f"🤖 Logged in as {bot.user}")
-
-
-@tree.error
-async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    if isinstance(error, app_commands.errors.MissingPermissions):
-        await send_response(interaction, "❌ You do not have permission to use this command.", ephemeral=True)
-        return
-
-    if isinstance(error, app_commands.errors.CommandOnCooldown):
-        await send_response(interaction, f"⏳ Command is on cooldown. Try again in {error.retry_after:.1f}s.", ephemeral=True)
-        return
-
-    if isinstance(error, app_commands.errors.TransformerError):
-        await send_response(interaction, "❌ Invalid option or argument. Please check command inputs.", ephemeral=True)
-        return
-
-    print(f"❌ App command error: {error}")
-    await send_response(interaction, "❌ Something went wrong while running that command.", ephemeral=True)
-
-
-# ======================================================
-# ================== ROLE TRACKING =====================
-# ======================================================
-def role_count(role):
-    return sum(1 for m in role.guild.members if role in m.roles)
-
-def role_embed(role):
-    return discord.Embed(
-        title="📊 Role Count",
-        description=f"{role.mention}\n👥 Members: {role_count(role)}",
-        color=role.color if role.color.value else discord.Color.blurple()
-    )
-
-def tracked_role_ids(data, gid):
-    return [int(rid) for rid in data.get(gid, {}) if rid.isdigit()]
-
-def tracked_roles_list_embed(guild, role_ids):
-    desc_lines = []
-    for rid in role_ids:
-        role = guild.get_role(rid)
-        if role:
-            desc_lines.append(f"{role.mention} — {role_count(role)} members")
-    if not desc_lines:
-        desc_lines = ["No roles are currently tracked."]
-    return discord.Embed(
-        title="📌 Tracked Roles",
-        description="\n".join(desc_lines),
+# ================== HELPERS ==================
+def help_embed():
+    categories = {
+        "🎮 Fun / Social": ["daily", "rep", "coinflip", "8ball", "meme", "roast"],
+        "🏆 Leveling": ["rank", "leaderboard", "prestige", "levelroles", "levelnotify", "backgrounds"],
+        "💬 Chat Boosters": ["question", "wouldyourather", "topic"],
+        "🛠️ Admin": ["setlevelchannel", "setxpmultiplier", "blacklistxp", "resetuserxp", "setlevel", "setxp", "setcooldown"],
+        "💰 Economy": ["balance", "givecoins", "setbalance", "work", "shop", "buybackground", "gamblerist", "koniheist", "divorce"],
+        "🎨 Cosmetics": ["setcolor", "setbadge", "profile", "voicebonus", "afk", "marry"],
+        "📌 Role Tracking": ["trackrole", "untrackrole", "trackrolelist", "trackroleall"],
+        "🖼️ Backgrounds": ["setrankbackground", "setlevelupbackground", "setrolereward", "removerolereward", "rolerewards"]
+    }
+    embed = discord.Embed(
+        title="📖 Command Center",
+        description="Use the buttons below to run popular commands, or select one from the dropdown for details.",
         color=discord.Color.blurple()
     )
+    for title, items in categories.items():
+        embed.add_field(name=title, value=", ".join(items), inline=False)
+    return embed
 
-@tree.command(name="trackrole")
-@app_commands.checks.has_permissions(administrator=True)
-async def trackrole(interaction: discord.Interaction, role: discord.Role):
-    data = load_store(TRACKED_STORE, {})
-    gid = str(interaction.guild.id)
-    data.setdefault(gid, {})
 
-    msg = await interaction.channel.send(embed=role_embed(role))
-    data[gid][str(role.id)] = {"channel": interaction.channel.id, "message": msg.id}
+def command_lookup(name):
+    for cmd in HELP_COMMANDS:
+        if cmd["name"] == name:
+            return cmd
+    return None
 
-    save_store(TRACKED_STORE, data)
-    await interaction.response.send_message("✅ Role tracked", ephemeral=True)
 
-@tree.command(name="untrackrole")
-@app_commands.checks.has_permissions(administrator=True)
-async def untrackrole(interaction: discord.Interaction, role: discord.Role):
-    data = load_store(TRACKED_STORE, {})
-    gid = str(interaction.guild.id)
-    if str(role.id) in data.get(gid, {}):
-        del data[gid][str(role.id)]
-        save_store(TRACKED_STORE, data)
-        await interaction.response.send_message("✅ Role untracked.", ephemeral=True)
+async def send_response(interaction, content=None, embed=None, ephemeral=False, file=None):
+    payload = {"content": content, "embed": embed, "ephemeral": ephemeral}
+    if file is not None:
+        payload["file"] = file
+    if interaction.response.is_done():
+        await interaction.followup.send(**payload)
     else:
-        await interaction.response.send_message("❌ That role isn't tracked.", ephemeral=True)
+        await interaction.response.send_message(**payload)
 
-@tree.command(name="trackrolelist")
-@app_commands.checks.has_permissions(administrator=True)
-async def trackrolelist(interaction: discord.Interaction):
-    data = load_store(TRACKED_STORE, {})
-    gid = str(interaction.guild.id)
-    role_ids = tracked_role_ids(data, gid)
-    embed = tracked_roles_list_embed(interaction.guild, role_ids)
 
-    msg = await interaction.channel.send(embed=embed)
-    data.setdefault(gid, {})["_list"] = {"channel": interaction.channel.id, "message": msg.id}
-    save_store(TRACKED_STORE, data)
-    await interaction.response.send_message("✅ Tracking list posted and will update every 5 minutes.", ephemeral=True)
-
-@tree.command(name="trackroleall")
-@app_commands.checks.has_permissions(administrator=True)
-async def trackroleall(interaction: discord.Interaction):
-    data = load_store(TRACKED_STORE, {})
-    gid = str(interaction.guild.id)
-    data.setdefault(gid, {})
-    for role in interaction.guild.roles:
-        if role.is_default():
-            continue
-        msg = await interaction.channel.send(embed=role_embed(role))
-        data[gid][str(role.id)] = {"channel": interaction.channel.id, "message": msg.id}
-    save_store(TRACKED_STORE, data)
-    await interaction.response.send_message("✅ All roles are now tracked.", ephemeral=True)
-
-@tree.command(name="untrackroleall")
-@app_commands.checks.has_permissions(administrator=True)
-async def untrackroleall(interaction: discord.Interaction):
-    data = load_store(TRACKED_STORE, {})
-    gid = str(interaction.guild.id)
-    list_info = data.get(gid, {}).get("_list")
-    data[gid] = {}
-    if list_info:
-        data[gid]["_list"] = list_info
-    save_store(TRACKED_STORE, data)
-    await interaction.response.send_message("✅ All roles untracked.", ephemeral=True)
-
-@tasks.loop(minutes=10)
-async def auto_update():
-    data = load_json(TRACKED_FILE)
-    data = load_store(TRACKED_STORE, {})
-    for guild in bot.guilds:
-        gid = str(guild.id)
-        for rid, info in data.get(gid, {}).items():
-            if not rid.isdigit():
-                continue
-            role = guild.get_role(int(rid))
-            if not role:
-                continue
-            try:
-                ch = guild.get_channel(info["channel"])
-                msg = await ch.fetch_message(info["message"])
-                await msg.edit(embed=role_embed(role))
-            except:
-                pass
-
-@tasks.loop(minutes=10)
-async def auto_update():
-    data = load_store(TRACKED_STORE, {})
-    for guild in bot.guilds:
-        gid = str(guild.id)
-        list_info = data.get(gid, {}).get("_list")
-        if not list_info:
-            continue
-        role_ids = tracked_role_ids(data, gid)
-        try:
-            ch = guild.get_channel(list_info["channel"])
-            msg = await ch.fetch_message(list_info["message"])
-            await msg.edit(embed=tracked_roles_list_embed(guild, role_ids))
-        except:
-            pass
-
+# ================== HELP UI ==================
 class HelpSelect(discord.ui.Select):
     def __init__(self, options):
         super().__init__(
@@ -952,13 +438,10 @@ class HelpSelect(discord.ui.Select):
         if not cmd:
             await interaction.response.send_message("Command not found.", ephemeral=True)
             return
-        embed = discord.Embed(
-            title=f"/{cmd['name']}",
-            description=cmd["desc"],
-            color=discord.Color.green()
-        )
+        embed = discord.Embed(title=f"/{cmd['name']}", description=cmd["desc"], color=discord.Color.green())
         embed.add_field(name="Usage", value=cmd["usage"], inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 class HelpView(discord.ui.View):
     def __init__(self):
@@ -1002,9 +485,9 @@ class HelpView(discord.ui.View):
     @discord.ui.button(label="Work", style=discord.ButtonStyle.secondary, emoji="🛠️")
     async def work_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await tree.get_command("work").callback(interaction)
-# ======================================================
-# ================== LEVEL SYSTEM ======================
-# ======================================================
+
+
+# ================== LEVEL SYSTEM ==================
 async def create_levelup_image(member, level, bg_path):
     if bg_path and os.path.exists(bg_path):
         bg = Image.open(bg_path).convert("RGBA")
@@ -1012,121 +495,87 @@ async def create_levelup_image(member, level, bg_path):
         bg = Image.new("RGBA", (800, 200), (54, 57, 63, 255))
 
     draw = ImageDraw.Draw(bg)
-
     try:
         font = ImageFont.truetype("arialbd.ttf", 48)
     except:
         font = ImageFont.load_default()
 
-    draw.text((250, 70), f"{member.display_name} reached Level {level}!", font=font, fill=(255,255,255))
+    draw.text((250, 70), f"{member.display_name} reached Level {level}!", font=font, fill=(255, 255, 255))
 
-    avatar = member.display_avatar.with_size(128)
     buf = io.BytesIO()
-    await avatar.save(buf)
+    await member.display_avatar.with_size(128).save(buf)
     buf.seek(0)
-    av = Image.open(buf).resize((120,120))
-    bg.paste(av,(50,40),av)
+    av = Image.open(buf).resize((120, 120))
+    bg.paste(av, (50, 40), av)
 
     out = io.BytesIO()
-    bg.save(out,"PNG")
+    bg.save(out, "PNG")
     out.seek(0)
     return out
 
-async def apply_level_ups(message: discord.Message, user: dict, gset: dict):
+
+async def apply_level_ups(message: discord.Message, user: dict, gset: dict, levels, settings):
+    leveled_up = False
     while user["xp"] >= xp_needed(user["level"]):
         user["xp"] -= xp_needed(user["level"])
         user["level"] += 1
+        leveled_up = True
 
         reward = gset["role_rewards"].get(str(user["level"]))
         if reward:
             role = message.guild.get_role(int(reward))
             if role:
-                await message.author.add_roles(role)
+                try:
+                    await message.author.add_roles(role)
+                except discord.HTTPException:
+                    pass
 
         level_notify = gset.get("level_notify", {}).get(str(message.author.id), True)
         if level_notify:
-            img = await create_levelup_image(
-                message.author,
-                user["level"],
-                gset.get("levelup_bg")
-            )
-
+            img = await create_levelup_image(message.author, user["level"], gset.get("levelup_bg"))
             level_channel_id = gset.get("level_channel")
-            level_channel = (
-                message.guild.get_channel(level_channel_id)
-                if level_channel_id
-                else message.channel
-            )
+            level_channel = message.guild.get_channel(level_channel_id) if level_channel_id else message.channel
+            try:
+                await level_channel.send(
+                    f"🎉 {message.author.mention} reached Level {user['level']}!",
+                    file=discord.File(img, "levelup.png")
+                )
+            except discord.HTTPException:
+                pass
 
-            await level_channel.send(
-                f"🎉 {message.author.mention} reached Level {user['level']}!",
-                file=discord.File(img, "levelup.png")
-            )
+    if leveled_up:
+        save_store(LEVEL_STORE, levels)
 
-            
+
+# ================== EVENTS ==================
+@bot.event
+async def on_ready():
+    connect_to_mongo()
+
+    print("🔄 Syncing commands globally...")
+    try:
+        synced = await tree.sync()
+        print(f"✅ Synced {len(synced)} commands globally")
+    except Exception as e:
+        print(f"❌ Sync error: {e}")
+
+    if not auto_update_tracked_roles.is_running():
+        auto_update_tracked_roles.start()
+
+    print(f"🤖 Logged in as {bot.user}")
+
 
 @bot.event
 async def on_message(message):
     if message.author.bot or not message.guild:
         return
 
-    settings = load_json(SETTINGS_FILE, {})
-    levels = load_json(LEVEL_FILE, {})
-
-    gset = settings.setdefault(str(message.guild.id), default_settings())
-    glevels = levels.setdefault(str(message.guild.id), {})
     gset, settings = get_guild_settings(message.guild.id)
     glevels, levels = get_level_data(message.guild.id)
     economy_guild, economy = get_economy_data(message.guild.id)
     econ_user = ensure_user_economy(economy_guild, message.author.id)
-    user = glevels.setdefault(str(message.author.id), {"xp": 0, "level": 1, "last": 0})
 
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    if not message.guild:
-        return
-
-    glevels, levels = get_level_data(message.guild.id)
-    user = glevels.setdefault(str(message.author.id), {"xp": 0, "level": 1, "last": 0})
-
-    # ✅ ROLE TRACK CHECK HERE
-    gset, _ = get_guild_settings(message.guild.id)
-    tracked_roles = gset.get("tracked_roles", [])
-
-    if tracked_roles:
-        if not any(role.id in tracked_roles for role in message.author.roles):
-            return
-
-    # continue XP logic...
-
-
-    if str(message.channel.id) in gset["ignored_channels"]:
-        return
-
-    if time.time() - user["last"] < gset["cooldown"]:
-        return
-
-    user["last"] = time.time()
-    user["xp"] += random.randint(*gset["xp_range"])
-    gained_xp = random.randint(*gset["xp_range"])
-    gained_xp = int(gained_xp * gset.get("xp_multiplier", 1.0))
-    user["xp"] += gained_xp
-
-    await apply_level_ups(message, user, gset)
-
-    save_store(LEVEL_STORE, levels)
-    save_store(SETTINGS_STORE, settings)
-    save_store(ECONOMY_STORE, economy)
-
-    if econ_user.get("afk"):
-        econ_user["afk"] = False
-        econ_user["afk_reason"] = None
-        save_store(ECONOMY_STORE, economy)
-        await message.channel.send(f"👋 Welcome back, {message.author.mention}! Your AFK is now off.")
-
+    # AFK mention detection
     if message.mentions:
         afk_mentions = []
         for mentioned in message.mentions:
@@ -1135,22 +584,56 @@ async def on_message(message):
                 reason = mentioned_data.get("afk_reason") or "No reason provided."
                 afk_mentions.append(f"{mentioned.display_name} is AFK: {reason}")
         if afk_mentions:
-            await message.channel.send("\n".join(afk_mentions))
+            try:
+                await message.channel.send("\n".join(afk_mentions))
+            except discord.HTTPException:
+                pass
+
+    # Clear AFK if user sends a message
+    if econ_user.get("afk"):
+        econ_user["afk"] = False
+        econ_user["afk_reason"] = None
+        save_store(ECONOMY_STORE, economy)
+        try:
+            await message.channel.send(f"👋 Welcome back, {message.author.mention}! Your AFK is now off.")
+        except discord.HTTPException:
+            pass
+
+    # XP logic
+    tracked_roles = gset.get("tracked_roles", [])
+    if tracked_roles:
+        if not any(role.id in tracked_roles for role in message.author.roles):
+            await bot.process_commands(message)
+            return
+
+    if str(message.channel.id) in gset.get("ignored_channels", []):
+        await bot.process_commands(message)
+        return
+
+    user = glevels.setdefault(str(message.author.id), {"xp": 0, "level": 1, "last": 0})
+
+    cooldown = gset.get("cooldown", gset.get("xp_cooldown", 2))
+    if time.time() - user.get("last", 0) < cooldown:
+        await bot.process_commands(message)
+        return
+
+    user["last"] = time.time()
+    gained_xp = random.randint(*gset["xp_range"])
+    gained_xp = int(gained_xp * gset.get("xp_multiplier", 1.0))
+    user["xp"] += gained_xp
+
+    await apply_level_ups(message, user, gset, levels, settings)
+    save_store(LEVEL_STORE, levels)
+    save_store(ECONOMY_STORE, economy)
+
     await bot.process_commands(message)
 
-    if user["xp"] >= xp_needed(user["level"]):
-        user["xp"] -= xp_needed(user["level"])
-        user["level"] += 1
 
-
-
-        
 @bot.event
 async def on_voice_state_update(member, before, after):
     if member.bot or not member.guild:
         return
 
-    # User joined a voice channel
     if before.channel is None and after.channel is not None:
         gset, settings = get_guild_settings(member.guild.id)
         economy_guild, economy = get_economy_data(member.guild.id)
@@ -1163,22 +646,86 @@ async def on_voice_state_update(member, before, after):
         if now - econ_user.get("last_voice_bonus", 0) < gset.get("voice_bonus_cooldown", 300):
             return
 
-        # Get leveling data
         glevels, levels = get_level_data(member.guild.id)
         user = glevels.setdefault(str(member.id), {"xp": 0, "level": 1, "last": 0})
 
         bonus_xp = gset.get("voice_bonus_xp", 10)
         bonus_xp = int(bonus_xp * gset.get("xp_multiplier", 1.0))
-
         user["xp"] += bonus_xp
         econ_user["last_voice_bonus"] = now
 
         save_store(LEVEL_STORE, levels)
         save_store(ECONOMY_STORE, economy)
 
-# ======================================================
-# ================== RANK CARD =========================
-# ======================================================
+
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.errors.MissingPermissions):
+        await send_response(interaction, "❌ You do not have permission to use this command.", ephemeral=True)
+        return
+    if isinstance(error, app_commands.errors.CommandOnCooldown):
+        await send_response(interaction, f"⏳ Command is on cooldown. Try again in {error.retry_after:.1f}s.", ephemeral=True)
+        return
+    if isinstance(error, app_commands.errors.TransformerError):
+        await send_response(interaction, "❌ Invalid option or argument. Please check command inputs.", ephemeral=True)
+        return
+    print(f"❌ App command error: {error}")
+    await send_response(interaction, "❌ Something went wrong while running that command.", ephemeral=True)
+
+
+# ================== BACKGROUND TASKS ==================
+@tasks.loop(minutes=5)
+async def auto_update_tracked_roles():
+    data = load_store(TRACKED_STORE, {})
+    for guild in bot.guilds:
+        gid = str(guild.id)
+        guild_data = data.get(gid, {})
+        for rid, info in guild_data.items():
+            if not rid.isdigit():
+                continue
+            role = guild.get_role(int(rid))
+            if not role:
+                continue
+            try:
+                ch = guild.get_channel(info["channel"])
+                if ch:
+                    msg = await ch.fetch_message(info["message"])
+                    count = sum(1 for m in guild.members if role in m.roles)
+                    embed = discord.Embed(
+                        title="📊 Role Count",
+                        description=f"{role.mention}\n👥 Members: {count}",
+                        color=role.color if role.color.value else discord.Color.blurple()
+                    )
+                    await msg.edit(embed=embed)
+            except Exception:
+                pass
+
+        list_info = guild_data.get("_list")
+        if list_info:
+            role_ids = [int(rid) for rid in guild_data if rid.isdigit()]
+            try:
+                ch = guild.get_channel(list_info["channel"])
+                if ch:
+                    msg = await ch.fetch_message(list_info["message"])
+                    desc_lines = []
+                    for rid in role_ids:
+                        role = guild.get_role(rid)
+                        if role:
+                            count = sum(1 for m in guild.members if role in m.roles)
+                            desc_lines.append(f"{role.mention} — {count} members")
+                    if not desc_lines:
+                        desc_lines = ["No roles are currently tracked."]
+                    embed = discord.Embed(
+                        title="📌 Tracked Roles",
+                        description="\n".join(desc_lines),
+                        color=discord.Color.blurple()
+                    )
+                    await msg.edit(embed=embed)
+            except Exception:
+                pass
+
+
+# ================== RANK CARD ==================
 def create_animated_rank_card(member, level, xp, required_xp, avatar_path, bg_path=None):
     width, height = 800, 250
     frames = []
@@ -1188,36 +735,31 @@ def create_animated_rank_card(member, level, xp, required_xp, avatar_path, bg_pa
 
     for i in range(15):
         if bg_path and os.path.exists(bg_path):
-            base = Image.open(bg_path).convert("RGB").resize((width,height))
+            base = Image.open(bg_path).convert("RGB").resize((width, height))
         else:
-            base = Image.new("RGB",(width,height),(30,30,30))
+            base = Image.new("RGB", (width, height), (30, 30, 30))
 
         draw = ImageDraw.Draw(base)
-        bar_width = int(500 * percent * (i/14))
+        bar_width = int(500 * percent * (i / 14))
 
-        draw.rectangle((250,150,750,190), fill=(50,50,50))
-        draw.rectangle((250,150,250+bar_width,190), fill=(120,0,255))
-
-        draw.text((250,50), member.name, fill="white")
-        draw.text((250,90), f"Level {level}", fill="white")
-        draw.text((250,120), f"{xp}/{required_xp} XP", fill="white")
-
-        base.paste(avatar,(40,35),avatar)
+        draw.rectangle((250, 150, 750, 190), fill=(50, 50, 50))
+        draw.rectangle((250, 150, 250 + bar_width, 190), fill=(120, 0, 255))
+        draw.text((250, 50), member.name, fill="white")
+        draw.text((250, 90), f"Level {level}", fill="white")
+        draw.text((250, 120), f"{xp}/{required_xp} XP", fill="white")
+        base.paste(avatar, (40, 35), avatar)
         frames.append(base)
 
-    path = f"rank_{member.id}.gif"
+    path = f"/tmp/rank_{member.id}.gif"
     frames[0].save(path, save_all=True, append_images=frames[1:], duration=60, loop=0)
     return path
 
-# ======================================================
-# ================== COMMANDS ==========================
-# ======================================================
+
+# ================== SLASH COMMANDS ==================
 
 @tree.command(name="rank", description="View your animated rank card")
-async def rank(interaction: discord.Interaction, member: Optional[discord.Member]=None):
+async def rank(interaction: discord.Interaction, member: Optional[discord.Member] = None):
     member = member or interaction.user
-    levels = load_json(LEVEL_FILE, {})
-    settings = load_json(SETTINGS_FILE, {})
     levels = load_store(LEVEL_STORE, {})
     settings = load_store(SETTINGS_STORE, {})
     gid, uid = str(interaction.guild.id), str(member.id)
@@ -1227,135 +769,124 @@ async def rank(interaction: discord.Interaction, member: Optional[discord.Member
         await interaction.response.send_message("No level data yet!", ephemeral=True)
         return
 
-    avatar_path = f"avatar_{uid}.png"
+    await interaction.response.defer()
+
+    avatar_path = f"/tmp/avatar_{uid}.png"
     await member.display_avatar.save(avatar_path)
 
     bg_path = settings.get(gid, {}).get("rank_backgrounds", {}).get(uid)
     required = xp_needed(user["level"])
-
     gif = create_animated_rank_card(member, user["level"], user["xp"], required, avatar_path, bg_path)
-    await interaction.response.send_message(file=discord.File(gif))
+    await interaction.followup.send(file=discord.File(gif))
 
-@tree.command(name="leaderboard")
+
+@tree.command(name="leaderboard", description="View top level members")
 async def leaderboard(interaction: discord.Interaction):
-    levels = load_json(LEVEL_FILE,{})
-    levels = load_store(LEVEL_STORE,{})
-    gid = str(interaction.guild.id)
-    top = sorted(levels.get(gid,{}).items(), key=lambda x:(x[1]["level"],x[1]["xp"]), reverse=True)[:10]
+    glevels, _ = get_level_data(interaction.guild.id)
 
-    embed = discord.Embed(title="🏆 Leaderboard", color=discord.Color.gold())
-    for i,(uid,data) in enumerate(top,1):
-        member = interaction.guild.get_member(int(uid))
+    if not glevels:
+        await interaction.response.send_message("No leaderboard data yet.")
+        return
+
+    sorted_users = sorted(
+        glevels.items(),
+        key=lambda x: (x[1].get("level", 1), x[1].get("xp", 0)),
+        reverse=True
+    )[:10]
+
+    embed = discord.Embed(title="🏆 Level Leaderboard", color=discord.Color.gold())
+    for i, (user_id, data) in enumerate(sorted_users, start=1):
+        member = interaction.guild.get_member(int(user_id))
         if member:
-            embed.add_field(name=f"{i}. {member.display_name}", value=f"Level {data['level']} • XP {data['xp']}", inline=False)
+            embed.add_field(
+                name=f"{i}. {member.display_name}",
+                value=f"Level {data.get('level', 1)} | {data.get('xp', 0)} XP",
+                inline=False
+            )
 
     await interaction.response.send_message(embed=embed)
 
-@tree.command(name="setxp")
-@app_commands.checks.has_permissions(administrator=True)
-async def setxp(interaction: discord.Interaction, min_xp:int, max_xp:int):
-    settings = load_json(SETTINGS_FILE,{})
-    settings = load_store(SETTINGS_STORE,{})
-    gid = str(interaction.guild.id)
-    settings.setdefault(gid, default_settings())["xp_range"] = [min_xp,max_xp]
-    save_json(SETTINGS_FILE, settings)
-    save_store(SETTINGS_STORE, settings)
-    await interaction.response.send_message("✅ XP updated", ephemeral=True)
 
-@tree.command(name="setcooldown")
+@tree.command(name="setxp", description="Set XP range per message")
 @app_commands.checks.has_permissions(administrator=True)
-async def setcooldown(interaction: discord.Interaction, seconds:int):
-    settings = load_json(SETTINGS_FILE,{})
-    settings = load_store(SETTINGS_STORE,{})
-    gid = str(interaction.guild.id)
-    settings.setdefault(gid, default_settings())["cooldown"] = seconds
-    save_json(SETTINGS_FILE, settings)
+async def setxp(interaction: discord.Interaction, min_xp: int, max_xp: int):
+    gset, settings = get_guild_settings(interaction.guild.id)
+    gset["xp_range"] = [min_xp, max_xp]
     save_store(SETTINGS_STORE, settings)
-    await interaction.response.send_message("⏳ Cooldown updated", ephemeral=True)
+    await interaction.response.send_message("✅ XP range updated.", ephemeral=True)
 
-@tree.command(name="setrankbackground")
-async def setrankbackground(interaction: discord.Interaction, image: discord.Attachment):
-    settings = load_json(SETTINGS_FILE,{})
-    settings = load_store(SETTINGS_STORE,{})
-    gid, uid = str(interaction.guild.id), str(interaction.user.id)
-    os.makedirs(f"rank_backgrounds/{gid}", exist_ok=True)
-    path = f"rank_backgrounds/{gid}/{uid}.png"
-    await image.save(path)
-    settings.setdefault(gid, default_settings())["rank_backgrounds"][uid] = path
-    save_json(SETTINGS_FILE, settings)
-    save_store(SETTINGS_STORE, settings)
-    await interaction.response.send_message("✅ Rank background set!", ephemeral=True)
 
-@tree.command(name="setlevelupbackground")
+@tree.command(name="setcooldown", description="Set XP message cooldown (seconds)")
 @app_commands.checks.has_permissions(administrator=True)
-async def setlevelupbackground(interaction: discord.Interaction, image: discord.Attachment):
-    if not image.content_type or not image.content_type.startswith("image/"):
-        await interaction.response.send_message("❌ Upload an image file.", ephemeral=True)
+async def setcooldown(interaction: discord.Interaction, seconds: int):
+    if seconds < 0:
+        await interaction.response.send_message("❌ Cooldown must be 0 or higher.", ephemeral=True)
+        return
+    gset, settings = get_guild_settings(interaction.guild.id)
+    gset["cooldown"] = seconds
+    save_store(SETTINGS_STORE, settings)
+    await interaction.response.send_message(f"⏳ Cooldown updated to {seconds}s.", ephemeral=True)
+
+
+@tree.command(name="setrankbackground", description="Set your active rank background")
+async def setrankbackground(interaction: discord.Interaction, background: str):
+    background = background.title()
+    economy_guild, economy = get_economy_data(interaction.guild.id)
+    user = ensure_user_economy(economy_guild, interaction.user.id)
+
+    if background not in user.get("backgrounds", []):
+        await interaction.response.send_message("❌ You don't own that background.", ephemeral=True)
         return
 
-    settings = load_json(SETTINGS_FILE, {})
-    settings = load_store(SETTINGS_STORE, {})
-    gid = str(interaction.guild.id)
+    user["active_background"] = background
+    save_store(ECONOMY_STORE, economy)
+    await interaction.response.send_message(f"🎨 Rank background set to **{background}**.", ephemeral=True)
 
-    os.makedirs("levelup_backgrounds", exist_ok=True)
-    path = f"levelup_backgrounds/{gid}.png"
-    await image.save(path)
 
-    settings.setdefault(gid, default_settings())["levelup_bg"] = path
-    save_json(SETTINGS_FILE, settings)
+@tree.command(name="setlevelupbackground", description="Set level-up image background URL (admin)")
+@app_commands.checks.has_permissions(administrator=True)
+async def setlevelupbackground(interaction: discord.Interaction, image_url: str):
+    gset, settings = get_guild_settings(interaction.guild.id)
+    gset["levelup_bg"] = image_url
     save_store(SETTINGS_STORE, settings)
-    await interaction.response.send_message("✅ Level-up background updated!", ephemeral=True)
+    await interaction.response.send_message("✅ Level-up background updated.", ephemeral=True)
 
-@tree.command(name="setrolereward")
+
+@tree.command(name="setrolereward", description="Give a role when a user reaches a level")
 @app_commands.checks.has_permissions(administrator=True)
 async def setrolereward(interaction: discord.Interaction, level: int, role: discord.Role):
-    settings = load_json(SETTINGS_FILE, {})
-    settings = load_store(SETTINGS_STORE, {})
-    gid = str(interaction.guild.id)
-    settings.setdefault(gid, default_settings())["role_rewards"][str(level)] = role.id
-    save_json(SETTINGS_FILE, settings)
+    gset, settings = get_guild_settings(interaction.guild.id)
+    gset["role_rewards"][str(level)] = role.id
     save_store(SETTINGS_STORE, settings)
-    await interaction.response.send_message(f"🎁 {role.mention} will be given at Level {level}", ephemeral=True)
+    await interaction.response.send_message(f"🎁 {role.mention} will be given at Level {level}.", ephemeral=True)
 
-@tree.command(name="removerolereward")
+
+@tree.command(name="removerolereward", description="Remove a level role reward")
 @app_commands.checks.has_permissions(administrator=True)
 async def removerolereward(interaction: discord.Interaction, level: int):
-    settings = load_json(SETTINGS_FILE, {})
-    settings = load_store(SETTINGS_STORE, {})
-    gid = str(interaction.guild.id)
-    rewards = settings.setdefault(gid, default_settings())["role_rewards"]
-
-    if str(level) in rewards:
-        del rewards[str(level)]
-        save_json(SETTINGS_FILE, settings)
-        save_store(SETTINGS_STORE, settings)
-        await interaction.response.send_message("🗑️ Reward removed.", ephemeral=True)
-    else:
+    gset, settings = get_guild_settings(interaction.guild.id)
+    rewards = gset.get("role_rewards", {})
+    if str(level) not in rewards:
         await interaction.response.send_message("❌ No reward set for that level.", ephemeral=True)
-
-@tree.command(name="rolerewards")
-async def rolerewards(interaction: discord.Interaction):
-    settings = load_json(SETTINGS_FILE, {})
-    settings = load_store(SETTINGS_STORE, {})
-    gid = str(interaction.guild.id)
-    rewards = settings.get(gid, {}).get("role_rewards", {})
-
-    if not rewards:
-        await interaction.response.send_message("No level rewards set yet.", ephemeral=True)
         return
+    del rewards[str(level)]
+    save_store(SETTINGS_STORE, settings)
+    await interaction.response.send_message(f"🗑️ Removed reward for level {level}.", ephemeral=True)
 
-    desc = ""
+
+@tree.command(name="rolerewards", description="View configured level role rewards")
+async def rolerewards(interaction: discord.Interaction):
+    gset, _ = get_guild_settings(interaction.guild.id)
+    rewards = gset.get("role_rewards", {})
+    if not rewards:
+        await interaction.response.send_message("No level rewards configured.")
+        return
+    embed = discord.Embed(title="🏆 Level Role Rewards", color=discord.Color.green())
     for level, role_id in sorted(rewards.items(), key=lambda x: int(x[0])):
         role = interaction.guild.get_role(int(role_id))
         if role:
-            desc += f"Level {level} → {role.mention}\n"
-
-    embed = discord.Embed(title="🎖️ Level Role Rewards", description=desc, color=discord.Color.green())
+            embed.add_field(name=f"Level {level}", value=role.mention, inline=False)
     await interaction.response.send_message(embed=embed)
-
-# ======================================================
-# ================== NEW COMMANDS/UNSORTED ======================
-# ======================================================
 
 
 @tree.command(name="daily", description="Claim daily XP and coins")
@@ -1377,9 +908,7 @@ async def daily(interaction: discord.Interaction):
 
     base_coins = 100
     base_xp = 50
-    bonus = 0
-    if econ_user["daily_streak"] % 7 == 0:
-        bonus = 50
+    bonus = 50 if econ_user["daily_streak"] % 7 == 0 else 0
 
     econ_user["coins"] += base_coins + bonus
     user["xp"] += base_xp + bonus
@@ -1387,31 +916,29 @@ async def daily(interaction: discord.Interaction):
 
     save_store(LEVEL_STORE, levels)
     save_store(ECONOMY_STORE, economy)
-
     await send_response(
         interaction,
         f"✅ Daily claimed! +{base_coins + bonus} coins, +{base_xp + bonus} XP. 🔥 Streak: {econ_user['daily_streak']}"
     )
+
 
 @tree.command(name="rep", description="Give a reputation point to someone")
 async def rep(interaction: discord.Interaction, member: discord.Member):
     if member.bot or member.id == interaction.user.id:
         await interaction.response.send_message("❌ You can't give rep to that user.", ephemeral=True)
         return
-
     economy_guild, economy = get_economy_data(interaction.guild.id)
     giver = ensure_user_economy(economy_guild, interaction.user.id)
     receiver = ensure_user_economy(economy_guild, member.id)
-
     now = time.time()
     if now - giver["rep_last"] < 86400:
         await interaction.response.send_message("⏳ You already gave rep today.", ephemeral=True)
         return
-
     receiver["rep"] += 1
     giver["rep_last"] = now
     save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message(f"👍 {member.mention} received a rep point!")
+
 
 @tree.command(name="coinflip", description="50/50 gamble for XP")
 async def coinflip(interaction: discord.Interaction):
@@ -1426,10 +953,11 @@ async def coinflip(interaction: discord.Interaction):
     save_store(LEVEL_STORE, levels)
     await send_response(interaction, result)
 
+
 @tree.command(name="8ball", description="Ask the magic 8-ball")
 async def eight_ball(interaction: discord.Interaction, question: str):
-    response = random.choice(EIGHT_BALL_RESPONSES)
-    await interaction.response.send_message(f"🎱 {response}")
+    await interaction.response.send_message(f"🎱 {random.choice(EIGHT_BALL_RESPONSES)}")
+
 
 @tree.command(name="meme", description="Grab a random meme")
 async def meme(interaction: discord.Interaction):
@@ -1443,7 +971,8 @@ async def meme(interaction: discord.Interaction):
     embed = discord.Embed(title=data.get("title", "Meme"), color=discord.Color.random())
     embed.set_image(url=data.get("url"))
     await send_response(interaction, embed=embed)
-    
+
+
 @tree.command(name="prestige", description="Prestige when you hit max level")
 async def prestige(interaction: discord.Interaction):
     glevels, levels = get_level_data(interaction.guild.id)
@@ -1465,27 +994,24 @@ async def prestige(interaction: discord.Interaction):
 
     save_store(LEVEL_STORE, levels)
     save_store(ECONOMY_STORE, economy)
-    save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message(f"⭐ Prestige unlocked! You are now {badge}.")
+
 
 @tree.command(name="levelroles", description="Show level role rewards")
 async def levelroles(interaction: discord.Interaction):
-    settings = load_store(SETTINGS_STORE, {})
-    gid = str(interaction.guild.id)
-    rewards = settings.get(gid, {}).get("role_rewards", {})
-
+    gset, _ = get_guild_settings(interaction.guild.id)
+    rewards = gset.get("role_rewards", {})
     if not rewards:
         await interaction.response.send_message("No level rewards set yet.", ephemeral=True)
         return
-
     desc = ""
     for level, role_id in sorted(rewards.items(), key=lambda x: int(x[0])):
         role = interaction.guild.get_role(int(role_id))
         if role:
             desc += f"Level {level} → {role.mention}\n"
-
     embed = discord.Embed(title="🏆 Level Role Rewards", description=desc, color=discord.Color.blurple())
     await interaction.response.send_message(embed=embed)
+
 
 @tree.command(name="levelnotify", description="Toggle level-up messages")
 async def levelnotify(interaction: discord.Interaction):
@@ -1495,6 +1021,7 @@ async def levelnotify(interaction: discord.Interaction):
     save_store(SETTINGS_STORE, settings)
     status = "ON" if gset["level_notify"][str(interaction.user.id)] else "OFF"
     await interaction.response.send_message(f"🔔 Level-up messages are now {status}.", ephemeral=True)
+
 
 @tree.command(name="backgrounds", description="Show unlocked rank backgrounds")
 async def backgrounds(interaction: discord.Interaction):
@@ -1507,17 +1034,21 @@ async def backgrounds(interaction: discord.Interaction):
     embed = discord.Embed(title="🎨 Your Backgrounds", description="\n".join(owned), color=discord.Color.purple())
     await interaction.response.send_message(embed=embed)
 
+
 @tree.command(name="question", description="Random conversation starter")
 async def question(interaction: discord.Interaction):
     await send_response(interaction, random.choice(CONVERSATION_STARTERS))
+
 
 @tree.command(name="wouldyourather", description="Random would-you-rather question")
 async def wouldyourather(interaction: discord.Interaction):
     await send_response(interaction, random.choice(WOULD_YOU_RATHER))
 
+
 @tree.command(name="topic", description="Random debate topic")
 async def topic(interaction: discord.Interaction):
     await send_response(interaction, random.choice(DEBATE_TOPICS))
+
 
 @tree.command(name="setlevelchannel", description="Set where level-up messages post")
 @app_commands.checks.has_permissions(administrator=True)
@@ -1527,6 +1058,7 @@ async def setlevelchannel(interaction: discord.Interaction, channel: discord.Tex
     save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message(f"✅ Level-up channel set to {channel.mention}", ephemeral=True)
 
+
 @tree.command(name="setxpmultiplier", description="Set XP multiplier")
 @app_commands.checks.has_permissions(administrator=True)
 async def setxpmultiplier(interaction: discord.Interaction, multiplier: float):
@@ -1534,6 +1066,7 @@ async def setxpmultiplier(interaction: discord.Interaction, multiplier: float):
     gset["xp_multiplier"] = max(0.1, min(multiplier, 5.0))
     save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message(f"✅ XP multiplier set to {gset['xp_multiplier']}x", ephemeral=True)
+
 
 @tree.command(name="blacklistxp", description="Block XP farming in a channel")
 @app_commands.checks.has_permissions(administrator=True)
@@ -1543,6 +1076,7 @@ async def blacklistxp(interaction: discord.Interaction, channel: discord.TextCha
         gset["ignored_channels"].append(str(channel.id))
     save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message(f"🚫 XP disabled in {channel.mention}", ephemeral=True)
+
 
 @tree.command(name="resetuserxp", description="Reset a user's XP and level")
 @app_commands.checks.has_permissions(administrator=True)
@@ -1564,8 +1098,7 @@ async def setlevel(interaction: discord.Interaction, member: discord.Member, lev
     }
     save_store(LEVEL_STORE, levels)
     await interaction.response.send_message(
-        f"✅ Set {member.mention} to level {max(1, int(level))} with {max(0, int(xp))} XP.",
-        ephemeral=True,
+        f"✅ Set {member.mention} to level {max(1, int(level))} with {max(0, int(xp))} XP.", ephemeral=True
     )
 
 
@@ -1575,6 +1108,7 @@ async def balance(interaction: discord.Interaction, member: Optional[discord.Mem
     coins = get_user_coins(interaction.guild.id, member.id)
     await send_response(interaction, f"💰 {member.display_name} has {coins} coins.")
 
+
 @tree.command(name="givecoins", description="Admin: Give coins to a user")
 @app_commands.checks.has_permissions(administrator=True)
 async def givecoins(interaction: discord.Interaction, member: discord.Member, amount: int):
@@ -1582,20 +1116,14 @@ async def givecoins(interaction: discord.Interaction, member: discord.Member, am
         await interaction.response.send_message("❌ Amount must be greater than 0.", ephemeral=True)
         return
     new_balance = update_user_coins(interaction.guild.id, member.id, amount)
-    await interaction.response.send_message(
-        f"✅ Gave {amount} coins to {member.mention}. New balance: {new_balance}",
-        ephemeral=True,
-    )
+    await interaction.response.send_message(f"✅ Gave {amount} coins to {member.mention}. New balance: {new_balance}", ephemeral=True)
 
 
 @tree.command(name="setbalance", description="Admin: Set a user's coin balance")
 @app_commands.checks.has_permissions(administrator=True)
 async def setbalance(interaction: discord.Interaction, member: discord.Member, amount: int):
     new_balance = set_user_coins(interaction.guild.id, member.id, amount)
-    await interaction.response.send_message(
-        f"✅ Set {member.mention}'s balance to {new_balance} coins.",
-        ephemeral=True,
-    )
+    await interaction.response.send_message(f"✅ Set {member.mention}'s balance to {new_balance} coins.", ephemeral=True)
 
 
 @tree.command(name="work", description="Earn coins every hour")
@@ -1612,11 +1140,13 @@ async def work(interaction: discord.Interaction):
     save_store(ECONOMY_STORE, economy)
     await send_response(interaction, f"🛠️ You earned {earned} coins!")
 
+
 @tree.command(name="shop", description="View the shop")
 async def shop(interaction: discord.Interaction):
     lines = [f"**{name}** — {price} coins" for name, price in SHOP_BACKGROUNDS.items()]
     embed = discord.Embed(title="🛒 Background Shop", description="\n".join(lines), color=discord.Color.gold())
     await interaction.response.send_message(embed=embed)
+
 
 @tree.command(name="buybackground", description="Buy a rank background")
 async def buybackground(interaction: discord.Interaction, background: str):
@@ -1638,6 +1168,7 @@ async def buybackground(interaction: discord.Interaction, background: str):
     save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message(f"🎉 You bought the **{background}** background!")
 
+
 @tree.command(name="setcolor", description="Set your rank card accent color (hex)")
 async def setcolor(interaction: discord.Interaction, color_hex: str):
     if not color_hex.startswith("#") or len(color_hex) not in (4, 7):
@@ -1648,6 +1179,7 @@ async def setcolor(interaction: discord.Interaction, color_hex: str):
     econ_user["color"] = color_hex
     save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message(f"🎨 Color updated to {color_hex}.", ephemeral=True)
+
 
 @tree.command(name="setbadge", description="Choose a badge to display")
 async def setbadge(interaction: discord.Interaction, badge: str):
@@ -1660,13 +1192,14 @@ async def setbadge(interaction: discord.Interaction, badge: str):
     save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message(f"🏅 Badge set to **{badge}**.", ephemeral=True)
 
+
 @tree.command(name="profile", description="View a user's profile")
 async def profile(interaction: discord.Interaction, member: Optional[discord.Member] = None):
     member = member or interaction.user
     glevels, _ = get_level_data(interaction.guild.id)
     economy_guild, _ = get_economy_data(interaction.guild.id)
     econ_user = ensure_user_economy(economy_guild, member.id)
-    user = glevels.get(str(member.id), {"xp": 0, "level": 1})
+    user = glevels.get(str(interaction.guild.id), {}).get(str(member.id), {"xp": 0, "level": 1})
 
     embed = discord.Embed(title=f"{member.display_name}'s Profile", color=discord.Color.blue())
     embed.add_field(name="Level", value=str(user.get("level", 1)))
@@ -1676,8 +1209,13 @@ async def profile(interaction: discord.Interaction, member: Optional[discord.Mem
     embed.add_field(name="Prestige", value=str(econ_user.get("prestige", 0)))
     embed.add_field(name="Badge", value=econ_user.get("badge") or "None", inline=True)
     embed.add_field(name="Color", value=econ_user.get("color") or "Default", inline=True)
-    embed.add_field(name="Married To", value=f"<@{econ_user['married_to']}>" if econ_user.get("married_to") else "None", inline=True)
+    embed.add_field(
+        name="Married To",
+        value=f"<@{econ_user['married_to']}>" if econ_user.get("married_to") else "None",
+        inline=True
+    )
     await interaction.response.send_message(embed=embed)
+
 
 @tree.command(name="voicebonus", description="Toggle voice bonus XP")
 async def voicebonus(interaction: discord.Interaction):
@@ -1688,6 +1226,7 @@ async def voicebonus(interaction: discord.Interaction):
     status = "ON" if econ_user["voice_bonus"] else "OFF"
     await interaction.response.send_message(f"🎧 Voice bonus is now {status}.", ephemeral=True)
 
+
 @tree.command(name="afk", description="Set your AFK status")
 async def afk(interaction: discord.Interaction, reason: Optional[str] = None):
     economy_guild, economy = get_economy_data(interaction.guild.id)
@@ -1696,6 +1235,7 @@ async def afk(interaction: discord.Interaction, reason: Optional[str] = None):
     econ_user["afk_reason"] = reason
     save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message("😴 You're now AFK.", ephemeral=True)
+
 
 @tree.command(name="marry", description="Marry another user")
 async def marry(interaction: discord.Interaction, member: discord.Member):
@@ -1712,6 +1252,7 @@ async def marry(interaction: discord.Interaction, member: discord.Member):
     partner["married_to"] = interaction.user.id
     save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message(f"💍 {interaction.user.mention} and {member.mention} are now married!")
+
 
 @tree.command(name="divorce", description="Divorce your partner (costs 500 coins)")
 async def divorce(interaction: discord.Interaction):
@@ -1733,6 +1274,7 @@ async def divorce(interaction: discord.Interaction):
         "💔 How could you! you dirty bastard whyd you cheat?! thats it if i cant have you nobody can! *grabs shotgun*"
     )
 
+
 @tree.command(name="gamblerist", description="50/50 chance to gain or lose 500 coins")
 async def gamblerist(interaction: discord.Interaction):
     economy_guild, economy = get_economy_data(interaction.guild.id)
@@ -1742,10 +1284,11 @@ async def gamblerist(interaction: discord.Interaction):
         user["coins"] += 500
         result = "🎲 You won! +500 coins"
     else:
-        user["coins"] -= 500
+        user["coins"] = max(0, user["coins"] - 500)
         result = "🎲 You lost! -500 coins"
     save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message(result)
+
 
 @tree.command(name="koniheist", description="Answer a trivia question for 900 coins (20 min cooldown)")
 async def koniheist(interaction: discord.Interaction):
@@ -1787,10 +1330,10 @@ async def koniheist(interaction: discord.Interaction):
     except asyncio.TimeoutError:
         countdown_stop.set()
         await countdown
-        update_user_coins(interaction.guild.id, interaction.user.id, -300)
         user["last_heist"] = now
         save_store(ECONOMY_STORE, economy)
-        await interaction.followup.send("🚔 You got caught by the police! -300 coins.")
+        new_balance = update_user_coins(interaction.guild.id, interaction.user.id, -300)
+        await interaction.followup.send(f"🚔 You got caught by the police! -300 coins. Balance: {new_balance}")
         return
 
     user["last_heist"] = now
@@ -1801,7 +1344,8 @@ async def koniheist(interaction: discord.Interaction):
         await interaction.followup.send(f"💰 Heist success! +900 coins. New balance: {new_balance}")
     else:
         new_balance = update_user_coins(interaction.guild.id, interaction.user.id, -300)
-        await interaction.followup.send(f"🚔 Wrong answer! You got caught by the police! -300 coins. New balance: {new_balance}")
+        await interaction.followup.send(f"🚔 Wrong answer! -300 coins. New balance: {new_balance}")
+
 
 @tree.command(name="roast", description="Roast someone creatively")
 async def roast(interaction: discord.Interaction, member: discord.Member):
@@ -1812,216 +1356,67 @@ async def roast(interaction: discord.Interaction, member: discord.Member):
         await interaction.response.send_message("😅 Self-roast? Bold move.", ephemeral=True)
         return
     roast_line = random.choice(ROAST_LINES)
-    embed = discord.Embed(
-        description=f"{member.mention} {roast_line}",
-        color=discord.Color.orange()
-    )
+    embed = discord.Embed(description=f"{member.mention} {roast_line}", color=discord.Color.orange())
     embed.set_image(url=LAUGH_IMAGE_URL)
     await interaction.response.send_message(embed=embed)
+
 
 @tree.command(name="help", description="Show the command center")
 async def help_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=help_embed(), view=HelpView(), ephemeral=True)
 
+
 @bot.command(name="help")
 async def help_prefix(ctx: commands.Context):
     await ctx.send(embed=help_embed(), view=HelpView())
-    
-    
-# ================== /leaderboard ==================
 
-@tree.command(name="leaderboard", description="View top level members")
-async def leaderboard(interaction: discord.Interaction):
-    glevels, _ = get_level_data(interaction.guild.id)
 
-    if not glevels:
-        await interaction.response.send_message("No leaderboard data yet.")
-        return
-
-    sorted_users = sorted(
-        glevels.items(),
-        key=lambda x: (x[1].get("level", 1), x[1].get("xp", 0)),
-        reverse=True
-    )[:10]
-
-    embed = discord.Embed(title="🏆 Level Leaderboard", color=discord.Color.gold())
-
-    for i, (user_id, data) in enumerate(sorted_users, start=1):
-        member = interaction.guild.get_member(int(user_id))
-        if member:
-            embed.add_field(
-                name=f"{i}. {member.display_name}",
-                value=f"Level {data.get('level', 1)} | {data.get('xp', 0)} XP",
-                inline=False
-            )
-
-    await interaction.response.send_message(embed=embed)
-    
-# ================== /Role tracking ==================
-
-@tree.command(name="trackrole", description="Give XP only to users with this role")
+# ================== ROLE TRACKING COMMANDS ==================
+@tree.command(name="trackrole", description="Restrict XP gains to users with this role")
 @app_commands.checks.has_permissions(administrator=True)
 async def trackrole(interaction: discord.Interaction, role: discord.Role):
     gset, settings = get_guild_settings(interaction.guild.id)
     tracked = gset.setdefault("tracked_roles", [])
-
     if role.id in tracked:
         await interaction.response.send_message("Role already tracked.", ephemeral=True)
         return
-
     tracked.append(role.id)
     save_store(SETTINGS_STORE, settings)
-    await interaction.response.send_message(f"✅ Now tracking XP for {role.mention}", ephemeral=True)
+    await interaction.response.send_message(f"✅ Now restricting XP to {role.mention}", ephemeral=True)
 
-@tree.command(name="untrackrole", description="Stop tracking a role for XP")
+
+@tree.command(name="untrackrole", description="Remove XP role restriction")
 @app_commands.checks.has_permissions(administrator=True)
 async def untrackrole(interaction: discord.Interaction, role: discord.Role):
     gset, settings = get_guild_settings(interaction.guild.id)
     tracked = gset.setdefault("tracked_roles", [])
-
     if role.id not in tracked:
         await interaction.response.send_message("Role not tracked.", ephemeral=True)
         return
-
     tracked.remove(role.id)
     save_store(SETTINGS_STORE, settings)
-    await interaction.response.send_message(f"❌ Stopped tracking {role.mention}", ephemeral=True)
-@tree.command(name="trackroleall", description="Allow XP for all roles")
+    await interaction.response.send_message(f"❌ Removed XP restriction for {role.mention}", ephemeral=True)
+
+
+@tree.command(name="trackroleall", description="Allow XP for all roles (clear restrictions)")
 @app_commands.checks.has_permissions(administrator=True)
 async def trackroleall(interaction: discord.Interaction):
     gset, settings = get_guild_settings(interaction.guild.id)
     gset["tracked_roles"] = []
     save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message("✅ XP now works for all roles.", ephemeral=True)
-    
-@tree.command(name="trackroleall", description="Allow XP for all roles")
-@app_commands.checks.has_permissions(administrator=True)
-async def trackroleall(interaction: discord.Interaction):
-    gset, settings = get_guild_settings(interaction.guild.id)
-    gset["tracked_roles"] = []
-    save_store(SETTINGS_STORE, settings)
-    await interaction.response.send_message("✅ XP now works for all roles.", ephemeral=True)
-    
-@tree.command(name="trackrolelist", description="Show tracked XP roles")
+
+
+@tree.command(name="trackrolelist", description="Show XP-restricted roles")
 async def trackrolelist(interaction: discord.Interaction):
     gset, _ = get_guild_settings(interaction.guild.id)
     tracked = gset.get("tracked_roles", [])
-
     if not tracked:
-        await interaction.response.send_message("XP works for all roles.")
+        await interaction.response.send_message("XP works for all roles (no restrictions).")
         return
-
     roles = [interaction.guild.get_role(rid) for rid in tracked]
     mentions = [r.mention for r in roles if r]
-
-    await interaction.response.send_message(
-        "Tracked roles:\n" + "\n".join(mentions)
-    )
-
-@tree.command(name="setcooldown", description="Set XP message cooldown (seconds)")
-@app_commands.checks.has_permissions(administrator=True)
-async def setcooldown(interaction: discord.Interaction, seconds: int):
-    if seconds < 0:
-        await interaction.response.send_message("❌ Cooldown must be 0 or higher.", ephemeral=True)
-        return
-
-    gset, settings = get_guild_settings(interaction.guild.id)
-    gset["xp_cooldown"] = seconds
-    save_store(SETTINGS_STORE, settings)
-
-    await interaction.response.send_message(
-        f"✅ XP cooldown set to {seconds} seconds.",
-        ephemeral=True
-    )
-
-@tree.command(name="setlevelupbackground", description="Set level-up image background (image URL)")
-@app_commands.checks.has_permissions(administrator=True)
-async def setlevelupbackground(interaction: discord.Interaction, image_url: str):
-    gset, settings = get_guild_settings(interaction.guild.id)
-    gset["levelup_background"] = image_url
-    save_store(SETTINGS_STORE, settings)
-
-    await interaction.response.send_message(
-        "✅ Level-up background updated.",
-        ephemeral=True
-    )
-
-@tree.command(name="setrankbackground", description="Set your active rank background")
-async def setrankbackground(interaction: discord.Interaction, background: str):
-    background = background.title()
-
-    economy_guild, economy = get_economy_data(interaction.guild.id)
-    user = ensure_user_economy(economy_guild, interaction.user.id)
-
-    if background not in user.get("backgrounds", []):
-        await interaction.response.send_message(
-            "❌ You don't own that background.",
-            ephemeral=True
-        )
-        return
-
-    user["active_background"] = background
-    save_store(ECONOMY_STORE, economy)
-
-    await interaction.response.send_message(
-        f"🎨 Rank background set to **{background}**.",
-        ephemeral=True
-    )
-
-@tree.command(name="rolerewards", description="View configured level role rewards")
-async def rolerewards(interaction: discord.Interaction):
-    gset, _ = get_guild_settings(interaction.guild.id)
-    rewards = gset.get("role_rewards", {})
-
-    if not rewards:
-        await interaction.response.send_message("No level rewards configured.")
-        return
-
-    embed = discord.Embed(title="🏆 Level Role Rewards", color=discord.Color.green())
-
-    for level, role_id in sorted(rewards.items(), key=lambda x: int(x[0])):
-        role = interaction.guild.get_role(int(role_id))
-        if role:
-            embed.add_field(
-                name=f"Level {level}",
-                value=role.mention,
-                inline=False
-            )
-
-    await interaction.response.send_message(embed=embed)
-
-
-@tree.command(name="removerolereward", description="Remove a level role reward")
-@app_commands.checks.has_permissions(administrator=True)
-async def removerolereward(interaction: discord.Interaction, level: int):
-    gset, settings = get_guild_settings(interaction.guild.id)
-    rewards = gset.get("role_rewards", {})
-
-    if str(level) not in rewards:
-        await interaction.response.send_message("❌ No reward set for that level.", ephemeral=True)
-        return
-
-    del rewards[str(level)]
-    save_store(SETTINGS_STORE, settings)
-
-    await interaction.response.send_message(
-        f"❌ Removed reward for level {level}.",
-        ephemeral=True
-    )
-
-
-# ================== Events  ==================
-@bot.event
-async def on_ready():
-    connect_to_mongo()
-
-    if not auto_update.is_running():
-        auto_update.start()
-
-    if not auto_update_tracked_list.is_running():
-        auto_update_tracked_list.start()
-
-    print(f"✅ Logged in as {bot.user}")
+    await interaction.response.send_message("Tracked roles:\n" + "\n".join(mentions))
 
 
 # ================== START BOT ==================
