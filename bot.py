@@ -1984,7 +1984,10 @@ async def setrankbackground(interaction: discord.Interaction, background: str):
     user = ensure_user_economy(economy_guild, interaction.user.id)
 
     if background not in user.get("backgrounds", []):
-        await interaction.response.send_message("❌ You don't own that background.", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ You don't own that background.",
+            ephemeral=True
+        )
         return
 
     user["active_background"] = background
@@ -1993,11 +1996,6 @@ async def setrankbackground(interaction: discord.Interaction, background: str):
     await interaction.response.send_message(
         f"🎨 Rank background set to **{background}**.",
         ephemeral=True
-
-        bg = gset.get("levelup_background")
-if bg:
-    embed.set_image(url=bg)
-
     )
 
 @tree.command(name="rolerewards", description="View configured level role rewards")
