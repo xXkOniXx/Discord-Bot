@@ -1946,6 +1946,7 @@ async def trackrolelist(interaction: discord.Interaction):
 
     await interaction.response.send_message(
         "Tracked roles:\n" + "\n".join(mentions)
+    )
 
 @tree.command(name="setcooldown", description="Set XP message cooldown (seconds)")
 @app_commands.checks.has_permissions(administrator=True)
