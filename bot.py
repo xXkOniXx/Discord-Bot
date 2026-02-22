@@ -2026,6 +2026,5 @@ async def on_ready():
 
 # ================== START BOT ==================
 if __name__ == "__main__":
-    
-bot.run(os.getenv("DISCORD_TOKEN"))
+    bot.run(os.getenv("DISCORD_TOKEN"))
 
