@@ -495,13 +495,13 @@ async def create_levelup_image(member, level, bg_path):
         bg = Image.new("RGBA", (800, 200), (54, 57, 63, 255))
 
     draw = ImageDraw.Draw(bg)
-try:
-    font = ImageFont.truetype("arialbd.ttf", 72)
-except:
     try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 72)
+        font = ImageFont.truetype("arialbd.ttf", 72)
     except:
-        font = ImageFont.load_default()
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 72)
+        except:
+            font = ImageFont.load_default()
 
     draw.text((250, 70), f"{member.display_name} reached Level {level}!", font=font, fill=(255, 255, 255))
 
