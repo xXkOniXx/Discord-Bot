@@ -390,10 +390,10 @@ def help_embed():
         "🎮 Fun / Social": ["daily", "rep", "coinflip", "8ball", "meme", "roast"],
         "🏆 Leveling": ["rank", "leaderboard", "prestige", "levelroles", "levelnotify", "backgrounds"],
         "💬 Chat Boosters": ["question", "wouldyourather", "topic"],
-        "🛠️ Admin": ["setlevelchannel", "setxpmultiplier", "blacklistxp", "resetuserxp", "setlevel", "setxp", "setcooldown"],
+        "🛠️ Admin": ["setlevelchannel", "clearlevelchannel", "setxpmultiplier", "blacklistxp", "unblacklistxp", "resetuserxp", "setlevel", "setxp", "setcooldown", "clearlevelupbackground"],
         "💰 Economy": ["balance", "givecoins", "setbalance", "work", "shop", "buybackground", "gamblerist", "koniheist", "divorce"],
-        "🎨 Cosmetics": ["setcolor", "setbadge", "profile", "voicebonus", "afk", "marry"],
-        "📌 Role Tracking": ["trackrole", "untrackrole", "trackrolelist", "trackroleall"],
+        "🎨 Cosmetics": ["setcolor", "clearcolor", "setbadge", "clearbadge", "profile", "voicebonus", "afk", "marry"],
+        "📌 Role Tracking": ["trackrole", "untrackrole", "trackrolelist", "trackroleall", "untrackroleall", "trackrolelist_clear"],
         "🖼️ Backgrounds": ["setrankbackground", "setlevelupbackground", "setrolereward", "removerolereward", "rolerewards"]
     }
     embed = discord.Embed(
@@ -1373,54 +1373,260 @@ async def help_command(interaction: discord.Interaction):
 @bot.command(name="help")
 async def help_prefix(ctx: commands.Context):
     await ctx.send(embed=help_embed(), view=HelpView())
+@tree.command(name="unblacklistxp", description="Re-enable XP in a blacklisted channel")
+@app_commands.checks.has_permissions(administrator=True)
+async def unblacklistxp(interaction: discord.Interaction, channel: discord.TextChannel):
+    gset, settings = get_guild_settings(interaction.guild.id)
+    if str(channel.id) in gset["ignored_channels"]:
+        gset["ignored_channels"].remove(str(channel.id))
+        save_store(SETTINGS_STORE, settings)
+        await interaction.response.send_message(f"✅ XP re-enabled in {channel.mention}", ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ That channel isn't blacklisted.", ephemeral=True)
 
+@tree.command(name="clearlevelchannel", description="Reset level-up messages back to the same channel as the message")
+@app_commands.checks.has_permissions(administrator=True)
+async def clearlevelchannel(interaction: discord.Interaction):
+    gset, settings = get_guild_settings(interaction.guild.id)
+    gset["level_channel"] = None
+    save_store(SETTINGS_STORE, settings)
+    await interaction.response.send_message("✅ Level-up channel cleared.", ephemeral=True)
+
+@tree.command(name="clearlevelupbackground", description="Reset level-up background to default")
+@app_commands.checks.has_permissions(administrator=True)
+async def clearlevelupbackground(interaction: discord.Interaction):
+    gset, settings = get_guild_settings(interaction.guild.id)
+    gset["levelup_bg"] = None
+    save_store(SETTINGS_STORE, settings)
+    await interaction.response.send_message("✅ Level-up background reset to default.", ephemeral=True)
+
+@tree.command(name="clearcolor", description="Reset your rank card color to default")
+async def clearcolor(interaction: discord.Interaction):
+    economy_guild, economy = get_economy_data(interaction.guild.id)
+    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
+    econ_user["color"] = None
+    save_store(ECONOMY_STORE, economy)
+    await interaction.response.send_message("🎨 Rank card color reset to default.", ephemeral=True)
+
+@tree.command(name="clearbadge", description="Remove your active badge")
+async def clearbadge(interaction: discord.Interaction):
+    economy_guild, economy = get_economy_data(interaction.guild.id)
+    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
+    econ_user["badge"] = None
+    save_store(ECONOMY_STORE, economy)
+    await interaction.response.send_message("🏅 Badge removed.", ephemeral=True)
 
 # ================== ROLE TRACKING COMMANDS ==================
-@tree.command(name="trackrole", description="Restrict XP gains to users with this role")
+
+ROLE_TRACKER_STORE = "role_tracker"
+
+def get_tracker_data(guild_id):
+    data = load_store(ROLE_TRACKER_STORE, {})
+    return data.setdefault(str(guild_id), {"tracked": {}, "list_message": None}), data
+
+def build_role_tracker_embed(guild, tracked_role_ids):
+    embed = discord.Embed(
+        title="📊 Role Tracker",
+        color=discord.Color.blurple(),
+        timestamp=discord.utils.utcnow()
+    )
+    if not tracked_role_ids:
+        embed.description = "No roles are currently being tracked."
+        embed.set_footer(text="Use /trackrole to add roles")
+        return embed
+
+    lines = []
+    total_members = 0
+    for rid in tracked_role_ids:
+        role = guild.get_role(int(rid))
+        if not role:
+            continue
+        count = sum(1 for m in guild.members if role in m.roles)
+        total_members += count
+        bar_filled = int((count / max(guild.member_count, 1)) * 10)
+        bar = "█" * bar_filled + "░" * (10 - bar_filled)
+        lines.append(f"{role.mention}\n`{bar}` **{count}** members")
+
+    embed.description = "\n\n".join(lines)
+    embed.set_footer(text=f"Tracking {len(tracked_role_ids)} role(s) • Last updated")
+    return embed
+
+@tasks.loop(minutes=2)
+async def auto_update_role_tracker():
+    data = load_store(ROLE_TRACKER_STORE, {})
+    for guild in bot.guilds:
+        gid = str(guild.id)
+        guild_data = data.get(gid, {})
+        tracked = guild_data.get("tracked", {})
+        list_msg = guild_data.get("list_message")
+
+        if not list_msg:
+            continue
+
+        try:
+            ch = guild.get_channel(list_msg["channel_id"])
+            if not ch:
+                continue
+            msg = await ch.fetch_message(list_msg["message_id"])
+            embed = build_role_tracker_embed(guild, list(tracked.keys()))
+            await msg.edit(embed=embed)
+        except Exception:
+            pass
+
+@bot.event
+async def on_member_update(before, after):
+    if before.roles == after.roles:
+        return
+
+    data = load_store(ROLE_TRACKER_STORE, {})
+    gid = str(after.guild.id)
+    guild_data = data.get(gid, {})
+    tracked = guild_data.get("tracked", {})
+    list_msg = guild_data.get("list_message")
+
+    changed_role_ids = {str(r.id) for r in set(before.roles) ^ set(after.roles)}
+    if not any(rid in tracked for rid in changed_role_ids):
+        return
+
+    if not list_msg:
+        return
+
+    try:
+        ch = after.guild.get_channel(list_msg["channel_id"])
+        if not ch:
+            return
+        msg = await ch.fetch_message(list_msg["message_id"])
+        embed = build_role_tracker_embed(after.guild, list(tracked.keys()))
+        await msg.edit(embed=embed)
+    except Exception:
+        pass
+
+@tree.command(name="trackrole", description="Add a role to the tracker")
 @app_commands.checks.has_permissions(administrator=True)
 async def trackrole(interaction: discord.Interaction, role: discord.Role):
-    gset, settings = get_guild_settings(interaction.guild.id)
-    tracked = gset.setdefault("tracked_roles", [])
-    if role.id in tracked:
-        await interaction.response.send_message("Role already tracked.", ephemeral=True)
+    guild_data, data = get_tracker_data(interaction.guild.id)
+    tracked = guild_data.setdefault("tracked", {})
+
+    if str(role.id) in tracked:
+        await interaction.response.send_message(f"❌ {role.mention} is already being tracked.", ephemeral=True)
         return
-    tracked.append(role.id)
-    save_store(SETTINGS_STORE, settings)
-    await interaction.response.send_message(f"✅ Now restricting XP to {role.mention}", ephemeral=True)
 
+    tracked[str(role.id)] = role.name
+    save_store(ROLE_TRACKER_STORE, data)
 
-@tree.command(name="untrackrole", description="Remove XP role restriction")
+    # Update the live embed if it exists
+    list_msg = guild_data.get("list_message")
+    if list_msg:
+        try:
+            ch = interaction.guild.get_channel(list_msg["channel_id"])
+            msg = await ch.fetch_message(list_msg["message_id"])
+            await msg.edit(embed=build_role_tracker_embed(interaction.guild, list(tracked.keys())))
+        except Exception:
+            pass
+
+    await interaction.response.send_message(f"✅ Now tracking {role.mention}.", ephemeral=True)
+
+@tree.command(name="untrackrole", description="Remove a role from the tracker")
 @app_commands.checks.has_permissions(administrator=True)
 async def untrackrole(interaction: discord.Interaction, role: discord.Role):
-    gset, settings = get_guild_settings(interaction.guild.id)
-    tracked = gset.setdefault("tracked_roles", [])
-    if role.id not in tracked:
-        await interaction.response.send_message("Role not tracked.", ephemeral=True)
+    guild_data, data = get_tracker_data(interaction.guild.id)
+    tracked = guild_data.setdefault("tracked", {})
+
+    if str(role.id) not in tracked:
+        await interaction.response.send_message(f"❌ {role.mention} is not being tracked.", ephemeral=True)
         return
-    tracked.remove(role.id)
-    save_store(SETTINGS_STORE, settings)
-    await interaction.response.send_message(f"❌ Removed XP restriction for {role.mention}", ephemeral=True)
 
+    del tracked[str(role.id)]
+    save_store(ROLE_TRACKER_STORE, data)
 
-@tree.command(name="trackroleall", description="Allow XP for all roles (clear restrictions)")
+    list_msg = guild_data.get("list_message")
+    if list_msg:
+        try:
+            ch = interaction.guild.get_channel(list_msg["channel_id"])
+            msg = await ch.fetch_message(list_msg["message_id"])
+            await msg.edit(embed=build_role_tracker_embed(interaction.guild, list(tracked.keys())))
+        except Exception:
+            pass
+
+    await interaction.response.send_message(f"✅ Stopped tracking {role.mention}.", ephemeral=True)
+
+@tree.command(name="trackroleall", description="Track every role in the server")
 @app_commands.checks.has_permissions(administrator=True)
 async def trackroleall(interaction: discord.Interaction):
-    gset, settings = get_guild_settings(interaction.guild.id)
-    gset["tracked_roles"] = []
-    save_store(SETTINGS_STORE, settings)
-    await interaction.response.send_message("✅ XP now works for all roles.", ephemeral=True)
+    guild_data, data = get_tracker_data(interaction.guild.id)
+    tracked = guild_data.setdefault("tracked", {})
 
+    added = 0
+    for role in interaction.guild.roles:
+        if role.is_default():
+            continue
+        if str(role.id) not in tracked:
+            tracked[str(role.id)] = role.name
+            added += 1
 
-@tree.command(name="trackrolelist", description="Show XP-restricted roles")
+    save_store(ROLE_TRACKER_STORE, data)
+
+    list_msg = guild_data.get("list_message")
+    if list_msg:
+        try:
+            ch = interaction.guild.get_channel(list_msg["channel_id"])
+            msg = await ch.fetch_message(list_msg["message_id"])
+            await msg.edit(embed=build_role_tracker_embed(interaction.guild, list(tracked.keys())))
+        except Exception:
+            pass
+
+    await interaction.response.send_message(f"✅ Now tracking all {added} roles.", ephemeral=True)
+
+@tree.command(name="untrackroleall", description="Remove all roles from the tracker")
+@app_commands.checks.has_permissions(administrator=True)
+async def untrackroleall(interaction: discord.Interaction):
+    guild_data, data = get_tracker_data(interaction.guild.id)
+    guild_data["tracked"] = {}
+    save_store(ROLE_TRACKER_STORE, data)
+
+    list_msg = guild_data.get("list_message")
+    if list_msg:
+        try:
+            ch = interaction.guild.get_channel(list_msg["channel_id"])
+            msg = await ch.fetch_message(list_msg["message_id"])
+            await msg.edit(embed=build_role_tracker_embed(interaction.guild, []))
+        except Exception:
+            pass
+
+    await interaction.response.send_message("✅ All roles untracked.", ephemeral=True)
+
+@tree.command(name="trackrolelist", description="Post the live role tracker panel in this channel")
+@app_commands.checks.has_permissions(administrator=True)
 async def trackrolelist(interaction: discord.Interaction):
-    gset, _ = get_guild_settings(interaction.guild.id)
-    tracked = gset.get("tracked_roles", [])
-    if not tracked:
-        await interaction.response.send_message("XP works for all roles (no restrictions).")
-        return
-    roles = [interaction.guild.get_role(rid) for rid in tracked]
-    mentions = [r.mention for r in roles if r]
-    await interaction.response.send_message("Tracked roles:\n" + "\n".join(mentions))
+    guild_data, data = get_tracker_data(interaction.guild.id)
+    tracked = guild_data.get("tracked", {})
+
+    embed = build_role_tracker_embed(interaction.guild, list(tracked.keys()))
+    await interaction.response.send_message("✅ Role tracker posted!", ephemeral=True)
+    msg = await interaction.channel.send(embed=embed)
+
+    guild_data["list_message"] = {
+        "channel_id": interaction.channel.id,
+        "message_id": msg.id
+    }
+    save_store(ROLE_TRACKER_STORE, data)
+
+@tree.command(name="trackrolelist_clear", description="Remove the live role tracker panel")
+@app_commands.checks.has_permissions(administrator=True)
+async def trackrolelist_clear(interaction: discord.Interaction):
+    guild_data, data = get_tracker_data(interaction.guild.id)
+    list_msg = guild_data.get("list_message")
+
+    if list_msg:
+        try:
+            ch = interaction.guild.get_channel(list_msg["channel_id"])
+            msg = await ch.fetch_message(list_msg["message_id"])
+            await msg.delete()
+        except Exception:
+            pass
+        guild_data["list_message"] = None
+        save_store(ROLE_TRACKER_STORE, data)
+    await interaction.response.send_message("✅ Role tracker panel removed.", ephemeral=True)
 
 
 # ================== START BOT ==================
