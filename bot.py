@@ -158,7 +158,6 @@ def ensure_user_economy(economy_guild, user_id):
     if uid not in economy_guild:
         economy_guild[uid] = default_economy_user()
     else:
-        # Fill in any missing keys from default
         defaults = default_economy_user()
         for k, v in defaults.items():
             economy_guild[uid].setdefault(k, v)
@@ -280,10 +279,156 @@ HEIST_TRIVIA = [
 
 LAUGH_IMAGE_URL = "https://media.giphy.com/media/10JhviFuU2gWD6/giphy.gif"
 
+# ================== GRIND QUESTIONS ==================
+GRIND_COOLDOWNS = {}
+
+GRIND_QUESTIONS = {
+    "Disney Movies": [
+        {"emojis": "🦁👑", "answer": ["lion king", "the lion king"]},
+        {"emojis": "🧊❄️👸", "answer": ["frozen"]},
+        {"emojis": "🐟🔵💙", "answer": ["finding nemo"]},
+        {"emojis": "🍎👸🐦", "answer": ["snow white"]},
+        {"emojis": "🧞‍♂️🪔✨", "answer": ["aladdin"]},
+        {"emojis": "🥀🕰️👗", "answer": ["beauty and the beast"]},
+        {"emojis": "🐠🐙🌊", "answer": ["finding dory"]},
+        {"emojis": "🐘🎪🎩", "answer": ["dumbo"]},
+        {"emojis": "🧵🪡👗🎃", "answer": ["the nightmare before christmas", "nightmare before christmas"]},
+        {"emojis": "🐜🍃🌿", "answer": ["a bugs life", "bugs life"]},
+        {"emojis": "🐻🍯🌳", "answer": ["winnie the pooh"]},
+        {"emojis": "🧜‍♀️🌊🐚", "answer": ["the little mermaid", "little mermaid"]},
+        {"emojis": "🚀👨‍🚀🤠", "answer": ["toy story"]},
+        {"emojis": "👠🎃🕛", "answer": ["cinderella"]},
+        {"emojis": "💤👸🌹", "answer": ["sleeping beauty"]},
+        {"emojis": "🌺💃🏝️", "answer": ["moana"]},
+        {"emojis": "🍄🔴⭐", "answer": ["mario"]},
+        {"emojis": "🦌❄️🌲", "answer": ["bambi"]},
+        {"emojis": "🎵🌄🦁🌍", "answer": ["lion king", "the lion king"]},
+        {"emojis": "🌹🕯️🏰", "answer": ["beauty and the beast"]},
+    ],
+    "Brands": [
+        {"emojis": "🍎💻📱", "answer": ["apple"]},
+        {"emojis": "✔️👟", "answer": ["nike"]},
+        {"emojis": "🐊👕", "answer": ["lacoste"]},
+        {"emojis": "🦅📦", "answer": ["american eagle"]},
+        {"emojis": "📘👍", "answer": ["facebook"]},
+        {"emojis": "🐦🔵", "answer": ["twitter"]},
+        {"emojis": "📸❤️", "answer": ["instagram"]},
+        {"emojis": "🟢🎵🎧", "answer": ["spotify"]},
+        {"emojis": "🛒🟡📦", "answer": ["amazon"]},
+        {"emojis": "🔵🛒🏪", "answer": ["walmart"]},
+        {"emojis": "☕🟢🧜‍♀️", "answer": ["starbucks"]},
+        {"emojis": "🏎️🐴🇮🇹", "answer": ["ferrari"]},
+        {"emojis": "🍩☕🇺🇸", "answer": ["dunkin", "dunkin donuts"]},
+        {"emojis": "🐊💚", "answer": ["crocs"]},
+        {"emojis": "🟥🎮", "answer": ["youtube"]},
+        {"emojis": "🔴▶️🎵", "answer": ["youtube music"]},
+        {"emojis": "⭐🍺🐴", "answer": ["budweiser"]},
+        {"emojis": "💎💍👜", "answer": ["tiffany"]},
+        {"emojis": "⭐🔵🚗", "answer": ["subaru"]},
+        {"emojis": "🎬📺🔴", "answer": ["netflix"]},
+    ],
+    "TV Shows": [
+        {"emojis": "🧪🔬💀", "answer": ["breaking bad"]},
+        {"emojis": "🐉⚔️👑❄️", "answer": ["game of thrones"]},
+        {"emojis": "🏝️✈️💥", "answer": ["lost"]},
+        {"emojis": "🧟‍♂️🪓🌍", "answer": ["the walking dead", "walking dead"]},
+        {"emojis": "🕵️‍♂️🔍🇬🇧", "answer": ["sherlock"]},
+        {"emojis": "👨‍👩‍👧‍👦🛋️☕", "answer": ["friends"]},
+        {"emojis": "🍕🗽👫", "answer": ["how i met your mother"]},
+        {"emojis": "🏥🩺❤️", "answer": ["greys anatomy", "grey's anatomy"]},
+        {"emojis": "🌌🚀👽", "answer": ["the x files", "x files"]},
+        {"emojis": "🧠🔬🤯", "answer": ["stranger things"]},
+        {"emojis": "🕶️🐝🐛", "answer": ["black mirror"]},
+        {"emojis": "🎸🎤🏫", "answer": ["glee"]},
+        {"emojis": "🏄‍♂️🌊🍍", "answer": ["spongebob", "spongebob squarepants"]},
+        {"emojis": "🔴🔵💊", "answer": ["the matrix", "matrix"]},
+        {"emojis": "🏰👻🕯️", "answer": ["haunting of hill house"]},
+        {"emojis": "🧛‍♂️🌲🏫", "answer": ["twilight"]},
+        {"emojis": "🤵🔫🍸", "answer": ["james bond"]},
+        {"emojis": "🌀🦸‍♂️🕷️", "answer": ["spiderman", "spider-man"]},
+        {"emojis": "🎭🃏🤡", "answer": ["joker"]},
+        {"emojis": "🏫👨‍🏫🔬", "answer": ["breaking bad"]},
+    ],
+    "Fast Food": [
+        {"emojis": "🍔👑", "answer": ["burger king"]},
+        {"emojis": "🍟🤡🍔", "answer": ["mcdonalds", "mcdonald's"]},
+        {"emojis": "🔔🌮", "answer": ["taco bell"]},
+        {"emojis": "🍗🤴", "answer": ["popeyes"]},
+        {"emojis": "🐔⭐", "answer": ["chick fil a", "chick-fil-a"]},
+        {"emojis": "🥖🥗🥪", "answer": ["subway"]},
+        {"emojis": "🏠🍕", "answer": ["dominos", "domino's"]},
+        {"emojis": "🍕🍕🍕", "answer": ["pizza hut"]},
+        {"emojis": "🦐🍤🦞", "answer": ["red lobster"]},
+        {"emojis": "🥩🔥🏪", "answer": ["arbys", "arby's"]},
+        {"emojis": "🍦🍨🍧", "answer": ["dairy queen", "dq"]},
+        {"emojis": "🧇🥞☕", "answer": ["ihop"]},
+        {"emojis": "🥚🧀🍳", "answer": ["waffle house"]},
+        {"emojis": "🐔🥤🍟", "answer": ["kfc", "kentucky fried chicken"]},
+        {"emojis": "🥩🧅🍞", "answer": ["shake shack"]},
+        {"emojis": "⭐🍔🌟", "answer": ["carls jr", "carl's jr", "hardees", "hardee's"]},
+        {"emojis": "🟠🍗", "answer": ["popeyes"]},
+        {"emojis": "🐟🍟", "answer": ["long john silvers", "long john silver's"]},
+        {"emojis": "🌊🦞🥧", "answer": ["red lobster"]},
+        {"emojis": "🍕🛵📱", "answer": ["doordash"]},
+    ],
+    "Characters": [
+        {"emojis": "🕷️🔴🕸️", "answer": ["spider-man", "spiderman"]},
+        {"emojis": "🦇🌑🦸", "answer": ["batman"]},
+        {"emojis": "🔴🔵⭐🛡️", "answer": ["captain america"]},
+        {"emojis": "🟢💪😡", "answer": ["hulk"]},
+        {"emojis": "⚡🔨🪨", "answer": ["thor"]},
+        {"emojis": "🧙‍♂️⚡📚", "answer": ["harry potter"]},
+        {"emojis": "🐭🧀🏃", "answer": ["jerry", "jerry mouse"]},
+        {"emojis": "🐱🏃🧀", "answer": ["tom", "tom cat"]},
+        {"emojis": "🟡😊🧽", "answer": ["spongebob", "spongebob squarepants"]},
+        {"emojis": "🌊🐙🦑", "answer": ["squidward"]},
+        {"emojis": "⭐🌟🌊", "answer": ["patrick", "patrick star"]},
+        {"emojis": "🤖🔴👁️", "answer": ["terminator"]},
+        {"emojis": "🧊❄️💙", "answer": ["elsa"]},
+        {"emojis": "🌺💃🏝️", "answer": ["moana"]},
+        {"emojis": "🦁👑🌍", "answer": ["simba"]},
+        {"emojis": "🐘🌊🎪", "answer": ["dumbo"]},
+        {"emojis": "🤠🐍👢", "answer": ["woody"]},
+        {"emojis": "🚀👨‍🚀💚", "answer": ["buzz lightyear", "buzz"]},
+        {"emojis": "🍄🔴⭐", "answer": ["mario"]},
+        {"emojis": "🦁🧙‍♂️🪄", "answer": ["gandalf"]},
+    ],
+    "Logos": [
+        {"emojis": "🍎⌨️💻", "answer": ["apple"]},
+        {"emojis": "🔵😊👍", "answer": ["facebook"]},
+        {"emojis": "🐦💬🔵", "answer": ["twitter"]},
+        {"emojis": "▶️🔴📺", "answer": ["youtube"]},
+        {"emojis": "🔍🌐🟦", "answer": ["google"]},
+        {"emojis": "🛒📦🔶", "answer": ["amazon"]},
+        {"emojis": "🎵🟢🎧", "answer": ["spotify"]},
+        {"emojis": "🎬📺🔴", "answer": ["netflix"]},
+        {"emojis": "🚗🗺️📍", "answer": ["uber"]},
+        {"emojis": "🟣📸✨", "answer": ["instagram"]},
+        {"emojis": "💼🔵👔", "answer": ["linkedin"]},
+        {"emojis": "🎮🟩", "answer": ["xbox"]},
+        {"emojis": "🎮🔵", "answer": ["playstation"]},
+        {"emojis": "🃏🎮🔴", "answer": ["nintendo"]},
+        {"emojis": "🐱💻", "answer": ["github"]},
+        {"emojis": "💬🟣", "answer": ["twitch"]},
+        {"emojis": "🎵📱🍎", "answer": ["apple music"]},
+        {"emojis": "🔵💬✈️", "answer": ["telegram"]},
+        {"emojis": "📘✈️🏨", "answer": ["airbnb"]},
+        {"emojis": "🟣💬", "answer": ["twitch"]},
+    ],
+}
+
+GRIND_GENRE_CHOICES = [
+    app_commands.Choice(name="🎬 Disney Movies", value="Disney Movies"),
+    app_commands.Choice(name="🏷️ Brands", value="Brands"),
+    app_commands.Choice(name="📺 TV Shows", value="TV Shows"),
+    app_commands.Choice(name="🍔 Fast Food", value="Fast Food"),
+    app_commands.Choice(name="🎭 Characters", value="Characters"),
+    app_commands.Choice(name="🔷 Logos", value="Logos"),
+]
 HELP_COMMANDS = [
     {"name": "daily", "usage": "/daily", "desc": "Claim daily XP and coins."},
     {"name": "rep", "usage": "/rep @user", "desc": "Give a reputation point."},
-    {"name": "coinflip", "usage": "/coinflip", "desc": "50/50 gamble for XP."},
+    {"name": "grind", "usage": "/grind <genre>", "desc": "Guess the emoji combo. Win 30 XP or lose 15 XP."},
     {"name": "8ball", "usage": "/8ball <question>", "desc": "Magic 8-ball response."},
     {"name": "meme", "usage": "/meme", "desc": "Fetch a random meme."},
     {"name": "question", "usage": "/question", "desc": "Conversation starter."},
@@ -294,8 +439,10 @@ HELP_COMMANDS = [
     {"name": "levelnotify", "usage": "/levelnotify", "desc": "Toggle level-up messages."},
     {"name": "backgrounds", "usage": "/backgrounds", "desc": "Show unlocked backgrounds."},
     {"name": "setlevelchannel", "usage": "/setlevelchannel #channel", "desc": "Set level-up channel."},
+    {"name": "clearlevelchannel", "usage": "/clearlevelchannel", "desc": "Reset level-up messages to same channel."},
     {"name": "setxpmultiplier", "usage": "/setxpmultiplier <num>", "desc": "Set XP multiplier."},
     {"name": "blacklistxp", "usage": "/blacklistxp #channel", "desc": "Block XP in channel."},
+    {"name": "unblacklistxp", "usage": "/unblacklistxp #channel", "desc": "Re-enable XP in a blacklisted channel."},
     {"name": "resetuserxp", "usage": "/resetuserxp @user", "desc": "Reset user XP."},
     {"name": "setlevel", "usage": "/setlevel @user <level> [xp]", "desc": "Admin: set user level/xp."},
     {"name": "balance", "usage": "/balance [@user]", "desc": "Check coin balance."},
@@ -305,7 +452,9 @@ HELP_COMMANDS = [
     {"name": "shop", "usage": "/shop", "desc": "View shop items."},
     {"name": "buybackground", "usage": "/buybackground <name>", "desc": "Buy a background."},
     {"name": "setcolor", "usage": "/setcolor #hex", "desc": "Set rank card color."},
+    {"name": "clearcolor", "usage": "/clearcolor", "desc": "Reset your rank card color to default."},
     {"name": "setbadge", "usage": "/setbadge <badge>", "desc": "Set profile badge."},
+    {"name": "clearbadge", "usage": "/clearbadge", "desc": "Remove your active badge."},
     {"name": "profile", "usage": "/profile [@user]", "desc": "View user profile."},
     {"name": "voicebonus", "usage": "/voicebonus", "desc": "Toggle voice XP bonus."},
     {"name": "afk", "usage": "/afk [reason]", "desc": "Set AFK status."},
@@ -320,13 +469,16 @@ HELP_COMMANDS = [
     {"name": "setcooldown", "usage": "/setcooldown <seconds>", "desc": "Set XP cooldown."},
     {"name": "setrankbackground", "usage": "/setrankbackground <background>", "desc": "Set rank background."},
     {"name": "setlevelupbackground", "usage": "/setlevelupbackground <url>", "desc": "Set level-up background URL."},
+    {"name": "clearlevelupbackground", "usage": "/clearlevelupbackground", "desc": "Reset level-up background to default."},
     {"name": "setrolereward", "usage": "/setrolereward <level> @role", "desc": "Set role reward."},
     {"name": "removerolereward", "usage": "/removerolereward <level>", "desc": "Remove role reward."},
     {"name": "rolerewards", "usage": "/rolerewards", "desc": "List role rewards."},
-    {"name": "trackrole", "usage": "/trackrole @role", "desc": "Restrict XP to a role."},
-    {"name": "untrackrole", "usage": "/untrackrole @role", "desc": "Remove XP role restriction."},
-    {"name": "trackrolelist", "usage": "/trackrolelist", "desc": "List XP-restricted roles."},
-    {"name": "trackroleall", "usage": "/trackroleall", "desc": "Allow XP for all roles."},
+    {"name": "trackrole", "usage": "/trackrole @role", "desc": "Add a role to the tracker."},
+    {"name": "untrackrole", "usage": "/untrackrole @role", "desc": "Remove a role from the tracker."},
+    {"name": "trackrolelist", "usage": "/trackrolelist", "desc": "Post the live role tracker panel."},
+    {"name": "trackroleall", "usage": "/trackroleall", "desc": "Track every role in the server."},
+    {"name": "untrackroleall", "usage": "/untrackroleall", "desc": "Remove all roles from the tracker."},
+    {"name": "trackrolelist_clear", "usage": "/trackrolelist_clear", "desc": "Remove the live role tracker panel."},
 ]
 
 ROAST_LINES = [
@@ -387,7 +539,7 @@ ROAST_LINES = [
 # ================== HELPERS ==================
 def help_embed():
     categories = {
-        "🎮 Fun / Social": ["daily", "rep", "coinflip", "8ball", "meme", "roast"],
+        "🎮 Fun / Social": ["daily", "rep", "grind", "8ball", "meme", "roast"],
         "🏆 Leveling": ["rank", "leaderboard", "prestige", "levelroles", "levelnotify", "backgrounds"],
         "💬 Chat Boosters": ["question", "wouldyourather", "topic"],
         "🛠️ Admin": ["setlevelchannel", "clearlevelchannel", "setxpmultiplier", "blacklistxp", "unblacklistxp", "resetuserxp", "setlevel", "setxp", "setcooldown", "clearlevelupbackground"],
@@ -458,9 +610,12 @@ class HelpView(discord.ui.View):
     async def daily_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await tree.get_command("daily").callback(interaction)
 
-    @discord.ui.button(label="Coinflip", style=discord.ButtonStyle.secondary, emoji="🪙")
-    async def coinflip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await tree.get_command("coinflip").callback(interaction)
+    @discord.ui.button(label="Grind", style=discord.ButtonStyle.secondary, emoji="🧠")
+    async def grind_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await tree.get_command("grind").callback(
+            interaction,
+            genre=app_commands.Choice(name="🎬 Disney Movies", value="Disney Movies")
+        )
 
     @discord.ui.button(label="Meme", style=discord.ButtonStyle.secondary, emoji="😂")
     async def meme_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -487,7 +642,7 @@ class HelpView(discord.ui.View):
         await tree.get_command("work").callback(interaction)
 
 
-# ================== LEVEL SYSTEM ==================
+        # ================== LEVEL SYSTEM ==================
 async def create_levelup_image(member, level, bg_path):
     if bg_path and os.path.exists(bg_path):
         bg = Image.open(bg_path).convert("RGBA")
@@ -566,6 +721,9 @@ async def on_ready():
     if not auto_update_tracked_roles.is_running():
         auto_update_tracked_roles.start()
 
+    if not auto_update_role_tracker.is_running():
+        auto_update_role_tracker.start()
+
     print(f"🤖 Logged in as {bot.user}")
 
 
@@ -579,7 +737,6 @@ async def on_message(message):
     economy_guild, economy = get_economy_data(message.guild.id)
     econ_user = ensure_user_economy(economy_guild, message.author.id)
 
-    # AFK mention detection
     if message.mentions:
         afk_mentions = []
         for mentioned in message.mentions:
@@ -593,7 +750,6 @@ async def on_message(message):
             except discord.HTTPException:
                 pass
 
-    # Clear AFK if user sends a message
     if econ_user.get("afk"):
         econ_user["afk"] = False
         econ_user["afk_reason"] = None
@@ -603,7 +759,6 @@ async def on_message(message):
         except discord.HTTPException:
             pass
 
-    # XP logic
     tracked_roles = gset.get("tracked_roles", [])
     if tracked_roles:
         if not any(role.id in tracked_roles for role in message.author.roles):
@@ -757,7 +912,6 @@ def create_animated_rank_card(member, level, xp, required_xp, avatar_path, bg_pa
     path = f"/tmp/rank_{member.id}.gif"
     frames[0].save(path, save_all=True, append_images=frames[1:], duration=60, loop=0)
     return path
-
 
 # ================== SLASH COMMANDS ==================
 
@@ -944,18 +1098,132 @@ async def rep(interaction: discord.Interaction, member: discord.Member):
     await interaction.response.send_message(f"👍 {member.mention} received a rep point!")
 
 
-@tree.command(name="coinflip", description="50/50 gamble for XP")
-async def coinflip(interaction: discord.Interaction):
-    glevels, levels = get_level_data(interaction.guild.id)
-    user = glevels.setdefault(str(interaction.user.id), {"xp": 0, "level": 1, "last": 0})
-    win = random.choice([True, False])
-    if win:
-        user["xp"] += 25
-        result = "🎉 You won! +25 XP"
+@tree.command(name="grind", description="Guess the emoji combo and win 30 XP!")
+@app_commands.describe(genre="Pick your category")
+@app_commands.choices(genre=GRIND_GENRE_CHOICES)
+async def grind(interaction: discord.Interaction, genre: app_commands.Choice[str]):
+    uid = interaction.user.id
+    now = time.time()
+    cooldown = 120
+
+    if uid in GRIND_COOLDOWNS and now - GRIND_COOLDOWNS[uid] < cooldown:
+        remaining = int(cooldown - (now - GRIND_COOLDOWNS[uid]))
+        await interaction.response.send_message(
+            f"⏳ You're still cooling down! Try again in **{remaining}s**.",
+            ephemeral=True
+        )
+        return
+
+    question = random.choice(GRIND_QUESTIONS[genre.value])
+    emojis = question["emojis"]
+    answers = question["answer"]
+    time_limit = 180
+
+    embed = discord.Embed(
+        title="🧠 Time to put your brain to the test!",
+        description=(
+            f"**Win this and you'll get +30 XP!**\n"
+            f"Koni will laugh at you if you lose this and take away 15 XP >:)\n\n"
+            f"**Category:** {genre.name}\n\n"
+            f"# {emojis}\n\n"
+            f"⏱️ You have **3:00** to answer!\n"
+            f"Type your answer in the chat below."
+        ),
+        color=discord.Color.blurple()
+    )
+    embed.set_footer(text=f"Requested by {interaction.user.display_name}")
+
+    await interaction.response.send_message(embed=embed)
+    prompt_msg = await interaction.original_response()
+    GRIND_COOLDOWNS[uid] = now
+
+    countdown_stop = asyncio.Event()
+
+    async def countdown_task():
+        for remaining in range(time_limit - 1, 0, -1):
+            if countdown_stop.is_set():
+                return
+            await asyncio.sleep(1)
+            if countdown_stop.is_set():
+                return
+            if remaining % 15 == 0 or remaining <= 10:
+                mins = remaining // 60
+                secs = remaining % 60
+                try:
+                    updated_embed = discord.Embed(
+                        title="🧠 Time to put your brain to the test!",
+                        description=(
+                            f"**Win this and you'll get +30 XP!**\n"
+                            f"Koni will laugh at you if you lose this and take away 15 XP >:)\n\n"
+                            f"**Category:** {genre.name}\n\n"
+                            f"# {emojis}\n\n"
+                            f"⏱️ You have **{mins}:{secs:02d}** to answer!\n"
+                            f"Type your answer in the chat below."
+                        ),
+                        color=discord.Color.blurple()
+                    )
+                    updated_embed.set_footer(text=f"Requested by {interaction.user.display_name}")
+                    await prompt_msg.edit(embed=updated_embed)
+                except discord.HTTPException:
+                    return
+
+    countdown = asyncio.create_task(countdown_task())
+
+    def check(msg):
+        return msg.author.id == interaction.user.id and msg.channel.id == interaction.channel.id
+
+    try:
+        msg = await bot.wait_for("message", timeout=float(time_limit), check=check)
+        countdown_stop.set()
+        await countdown
+    except asyncio.TimeoutError:
+        countdown_stop.set()
+        await countdown
+        glevels, levels = get_level_data(interaction.guild.id)
+        user = glevels.setdefault(str(interaction.user.id), {"xp": 0, "level": 1, "last": 0})
+        user["xp"] = max(0, user["xp"] - 15)
+        save_store(LEVEL_STORE, levels)
+        timeout_embed = discord.Embed(
+            title="😂 Koni is laughing at you!",
+            description=(
+                f"You ran out of time! The answer was **{answers[0].title()}**\n\n"
+                f"-15 XP has been taken. Embarrassing! 💀"
+            ),
+            color=discord.Color.red()
+        )
+        timeout_embed.set_image(url=LAUGH_IMAGE_URL)
+        await interaction.followup.send(embed=timeout_embed)
+        return
+
+    if msg.content.strip().lower() in answers:
+        glevels, levels = get_level_data(interaction.guild.id)
+        user = glevels.setdefault(str(interaction.user.id), {"xp": 0, "level": 1, "last": 0})
+        user["xp"] += 30
+        save_store(LEVEL_STORE, levels)
+        win_embed = discord.Embed(
+            title="🎉 Correct!",
+            description=(
+                f"**{answers[0].title()}** was right!\n\n"
+                f"+30 XP added. Koni is impressed... barely. 😏"
+            ),
+            color=discord.Color.green()
+        )
+        await interaction.followup.send(embed=win_embed)
     else:
-        result = "😅 You lost! Better luck next time."
-    save_store(LEVEL_STORE, levels)
-    await send_response(interaction, result)
+        glevels, levels = get_level_data(interaction.guild.id)
+        user = glevels.setdefault(str(interaction.user.id), {"xp": 0, "level": 1, "last": 0})
+        user["xp"] = max(0, user["xp"] - 15)
+        save_store(LEVEL_STORE, levels)
+        lose_embed = discord.Embed(
+            title="😂 Koni is HOWLING!",
+            description=(
+                f"Wrong! The answer was **{answers[0].title()}**\n\n"
+                f"-15 XP taken. You call yourself a gamer? 💀"
+            ),
+            color=discord.Color.red()
+        )
+        lose_embed.set_image(url=LAUGH_IMAGE_URL)
+        await interaction.followup.send(embed=lose_embed)
 
 
 @tree.command(name="8ball", description="Ask the magic 8-ball")
@@ -1063,6 +1331,15 @@ async def setlevelchannel(interaction: discord.Interaction, channel: discord.Tex
     await interaction.response.send_message(f"✅ Level-up channel set to {channel.mention}", ephemeral=True)
 
 
+@tree.command(name="clearlevelchannel", description="Reset level-up messages back to same channel as message")
+@app_commands.checks.has_permissions(administrator=True)
+async def clearlevelchannel(interaction: discord.Interaction):
+    gset, settings = get_guild_settings(interaction.guild.id)
+    gset["level_channel"] = None
+    save_store(SETTINGS_STORE, settings)
+    await interaction.response.send_message("✅ Level-up channel cleared.", ephemeral=True)
+
+
 @tree.command(name="setxpmultiplier", description="Set XP multiplier")
 @app_commands.checks.has_permissions(administrator=True)
 async def setxpmultiplier(interaction: discord.Interaction, multiplier: float):
@@ -1080,6 +1357,18 @@ async def blacklistxp(interaction: discord.Interaction, channel: discord.TextCha
         gset["ignored_channels"].append(str(channel.id))
     save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message(f"🚫 XP disabled in {channel.mention}", ephemeral=True)
+
+
+@tree.command(name="unblacklistxp", description="Re-enable XP in a blacklisted channel")
+@app_commands.checks.has_permissions(administrator=True)
+async def unblacklistxp(interaction: discord.Interaction, channel: discord.TextChannel):
+    gset, settings = get_guild_settings(interaction.guild.id)
+    if str(channel.id) in gset["ignored_channels"]:
+        gset["ignored_channels"].remove(str(channel.id))
+        save_store(SETTINGS_STORE, settings)
+        await interaction.response.send_message(f"✅ XP re-enabled in {channel.mention}", ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ That channel isn't blacklisted.", ephemeral=True)
 
 
 @tree.command(name="resetuserxp", description="Reset a user's XP and level")
@@ -1185,6 +1474,15 @@ async def setcolor(interaction: discord.Interaction, color_hex: str):
     await interaction.response.send_message(f"🎨 Color updated to {color_hex}.", ephemeral=True)
 
 
+@tree.command(name="clearcolor", description="Reset your rank card color to default")
+async def clearcolor(interaction: discord.Interaction):
+    economy_guild, economy = get_economy_data(interaction.guild.id)
+    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
+    econ_user["color"] = None
+    save_store(ECONOMY_STORE, economy)
+    await interaction.response.send_message("🎨 Rank card color reset to default.", ephemeral=True)
+
+
 @tree.command(name="setbadge", description="Choose a badge to display")
 async def setbadge(interaction: discord.Interaction, badge: str):
     economy_guild, economy = get_economy_data(interaction.guild.id)
@@ -1195,6 +1493,15 @@ async def setbadge(interaction: discord.Interaction, badge: str):
     econ_user["badge"] = badge
     save_store(ECONOMY_STORE, economy)
     await interaction.response.send_message(f"🏅 Badge set to **{badge}**.", ephemeral=True)
+
+
+@tree.command(name="clearbadge", description="Remove your active badge")
+async def clearbadge(interaction: discord.Interaction):
+    economy_guild, economy = get_economy_data(interaction.guild.id)
+    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
+    econ_user["badge"] = None
+    save_store(ECONOMY_STORE, economy)
+    await interaction.response.send_message("🏅 Badge removed.", ephemeral=True)
 
 
 @tree.command(name="profile", description="View a user's profile")
@@ -1373,24 +1680,7 @@ async def help_command(interaction: discord.Interaction):
 @bot.command(name="help")
 async def help_prefix(ctx: commands.Context):
     await ctx.send(embed=help_embed(), view=HelpView())
-@tree.command(name="unblacklistxp", description="Re-enable XP in a blacklisted channel")
-@app_commands.checks.has_permissions(administrator=True)
-async def unblacklistxp(interaction: discord.Interaction, channel: discord.TextChannel):
-    gset, settings = get_guild_settings(interaction.guild.id)
-    if str(channel.id) in gset["ignored_channels"]:
-        gset["ignored_channels"].remove(str(channel.id))
-        save_store(SETTINGS_STORE, settings)
-        await interaction.response.send_message(f"✅ XP re-enabled in {channel.mention}", ephemeral=True)
-    else:
-        await interaction.response.send_message("❌ That channel isn't blacklisted.", ephemeral=True)
 
-@tree.command(name="clearlevelchannel", description="Reset level-up messages back to the same channel as the message")
-@app_commands.checks.has_permissions(administrator=True)
-async def clearlevelchannel(interaction: discord.Interaction):
-    gset, settings = get_guild_settings(interaction.guild.id)
-    gset["level_channel"] = None
-    save_store(SETTINGS_STORE, settings)
-    await interaction.response.send_message("✅ Level-up channel cleared.", ephemeral=True)
 
 @tree.command(name="clearlevelupbackground", description="Reset level-up background to default")
 @app_commands.checks.has_permissions(administrator=True)
@@ -1400,29 +1690,14 @@ async def clearlevelupbackground(interaction: discord.Interaction):
     save_store(SETTINGS_STORE, settings)
     await interaction.response.send_message("✅ Level-up background reset to default.", ephemeral=True)
 
-@tree.command(name="clearcolor", description="Reset your rank card color to default")
-async def clearcolor(interaction: discord.Interaction):
-    economy_guild, economy = get_economy_data(interaction.guild.id)
-    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
-    econ_user["color"] = None
-    save_store(ECONOMY_STORE, economy)
-    await interaction.response.send_message("🎨 Rank card color reset to default.", ephemeral=True)
-
-@tree.command(name="clearbadge", description="Remove your active badge")
-async def clearbadge(interaction: discord.Interaction):
-    economy_guild, economy = get_economy_data(interaction.guild.id)
-    econ_user = ensure_user_economy(economy_guild, interaction.user.id)
-    econ_user["badge"] = None
-    save_store(ECONOMY_STORE, economy)
-    await interaction.response.send_message("🏅 Badge removed.", ephemeral=True)
-
-# ================== ROLE TRACKING COMMANDS ==================
-
+# ================== ROLE TRACKER SYSTEM ==================
 ROLE_TRACKER_STORE = "role_tracker"
+
 
 def get_tracker_data(guild_id):
     data = load_store(ROLE_TRACKER_STORE, {})
     return data.setdefault(str(guild_id), {"tracked": {}, "list_message": None}), data
+
 
 def build_role_tracker_embed(guild, tracked_role_ids):
     embed = discord.Embed(
@@ -1436,13 +1711,11 @@ def build_role_tracker_embed(guild, tracked_role_ids):
         return embed
 
     lines = []
-    total_members = 0
     for rid in tracked_role_ids:
         role = guild.get_role(int(rid))
         if not role:
             continue
         count = sum(1 for m in guild.members if role in m.roles)
-        total_members += count
         bar_filled = int((count / max(guild.member_count, 1)) * 10)
         bar = "█" * bar_filled + "░" * (10 - bar_filled)
         lines.append(f"{role.mention}\n`{bar}` **{count}** members")
@@ -1450,6 +1723,7 @@ def build_role_tracker_embed(guild, tracked_role_ids):
     embed.description = "\n\n".join(lines)
     embed.set_footer(text=f"Tracking {len(tracked_role_ids)} role(s) • Last updated")
     return embed
+
 
 @tasks.loop(minutes=2)
 async def auto_update_role_tracker():
@@ -1472,6 +1746,7 @@ async def auto_update_role_tracker():
             await msg.edit(embed=embed)
         except Exception:
             pass
+
 
 @bot.event
 async def on_member_update(before, after):
@@ -1501,6 +1776,7 @@ async def on_member_update(before, after):
     except Exception:
         pass
 
+
 @tree.command(name="trackrole", description="Add a role to the tracker")
 @app_commands.checks.has_permissions(administrator=True)
 async def trackrole(interaction: discord.Interaction, role: discord.Role):
@@ -1514,7 +1790,6 @@ async def trackrole(interaction: discord.Interaction, role: discord.Role):
     tracked[str(role.id)] = role.name
     save_store(ROLE_TRACKER_STORE, data)
 
-    # Update the live embed if it exists
     list_msg = guild_data.get("list_message")
     if list_msg:
         try:
@@ -1525,6 +1800,7 @@ async def trackrole(interaction: discord.Interaction, role: discord.Role):
             pass
 
     await interaction.response.send_message(f"✅ Now tracking {role.mention}.", ephemeral=True)
+
 
 @tree.command(name="untrackrole", description="Remove a role from the tracker")
 @app_commands.checks.has_permissions(administrator=True)
@@ -1549,6 +1825,7 @@ async def untrackrole(interaction: discord.Interaction, role: discord.Role):
             pass
 
     await interaction.response.send_message(f"✅ Stopped tracking {role.mention}.", ephemeral=True)
+
 
 @tree.command(name="trackroleall", description="Track every role in the server")
 @app_commands.checks.has_permissions(administrator=True)
@@ -1577,6 +1854,7 @@ async def trackroleall(interaction: discord.Interaction):
 
     await interaction.response.send_message(f"✅ Now tracking all {added} roles.", ephemeral=True)
 
+
 @tree.command(name="untrackroleall", description="Remove all roles from the tracker")
 @app_commands.checks.has_permissions(administrator=True)
 async def untrackroleall(interaction: discord.Interaction):
@@ -1595,6 +1873,7 @@ async def untrackroleall(interaction: discord.Interaction):
 
     await interaction.response.send_message("✅ All roles untracked.", ephemeral=True)
 
+
 @tree.command(name="trackrolelist", description="Post the live role tracker panel in this channel")
 @app_commands.checks.has_permissions(administrator=True)
 async def trackrolelist(interaction: discord.Interaction):
@@ -1611,6 +1890,7 @@ async def trackrolelist(interaction: discord.Interaction):
     }
     save_store(ROLE_TRACKER_STORE, data)
 
+
 @tree.command(name="trackrolelist_clear", description="Remove the live role tracker panel")
 @app_commands.checks.has_permissions(administrator=True)
 async def trackrolelist_clear(interaction: discord.Interaction):
@@ -1626,6 +1906,7 @@ async def trackrolelist_clear(interaction: discord.Interaction):
             pass
         guild_data["list_message"] = None
         save_store(ROLE_TRACKER_STORE, data)
+
     await interaction.response.send_message("✅ Role tracker panel removed.", ephemeral=True)
 
 
@@ -1633,3 +1914,5 @@ async def trackrolelist_clear(interaction: discord.Interaction):
 if __name__ == "__main__":
     bot.run(os.getenv("DISCORD_TOKEN"))
 
+    
+    
