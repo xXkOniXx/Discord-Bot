@@ -1402,7 +1402,7 @@ class HidingSpotView(discord.ui.View):
         for emoji, name in hiding_spots:
             btn = discord.ui.Button(label=f"{emoji} {name}", style=discord.ButtonStyle.primary)
 
-            async def make_callback(e=emoji, n=name):
+            def make_callback(e=emoji, n=name):
                 async def callback(interaction: discord.Interaction):
                     if interaction.user.id != self.user_id:
                         await interaction.response.send_message("❌ This isn't your hide!", ephemeral=True)
@@ -1441,7 +1441,7 @@ class HidingSpotView(discord.ui.View):
                     await interaction.response.edit_message(embed=result_embed, view=self)
                 return callback
 
-            btn.callback = await make_callback()
+            btn.callback = make_callback()
             self.add_item(btn)
 
 
@@ -1456,7 +1456,7 @@ class PinHeadItemView(discord.ui.View):
         for emoji, name in PINHEAD_ITEMS:
             btn = discord.ui.Button(label=emoji, style=discord.ButtonStyle.secondary)
 
-            async def make_callback(e=emoji, n=name):
+            def make_callback(e=emoji, n=name):
                 async def callback(interaction: discord.Interaction):
                     if interaction.user.id != self.user_id:
                         await interaction.response.send_message("❌ This isn't your deal!", ephemeral=True)
@@ -1492,7 +1492,7 @@ class PinHeadItemView(discord.ui.View):
                         await interaction.response.edit_message(embed=wrong_embed, view=self)
                 return callback
 
-            btn.callback = await make_callback()
+            btn.callback = make_callback()
             self.add_item(btn)
 
 
